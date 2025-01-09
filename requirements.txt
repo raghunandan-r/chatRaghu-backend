@@ -1,0 +1,9 @@
+langchain-google-vertexai
+langchain-openai
+langchain-pinecone
+google-cloud-aiplatform
+pinecone
+langgraph
+langchain-community
+beautifulsoup4
+flask
