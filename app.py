@@ -26,10 +26,28 @@ from threading import Thread
 import time
 from datetime import datetime, timedelta
 
-load_dotenv()
+load_dotenv('.env')
+load_dotenv('.env.development')
+
+print("loading with cors settings:")
+print(os.environ.get('ALLOWED_ORIGINS', '').split(','))
 
 app = Flask(__name__)
-CORS(app)  # This will allow all origins. For production, specify allowed origins
+
+# Get allowed origins from environment
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '').split(',')
+
+# Configure CORS with specific origins
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ALLOWED_ORIGINS,
+        "methods": ["POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "content-type", "X-API-KEY", "x-api-key"],
+        "expose_headers": ["X-Rate-Limit"],
+        "supports_credentials": True,
+        "max_age": 600  # Cache preflight requests for 10 minutes
+    }
+})
 
 # Initialize VertexAI
 vertexai.init(project=os.environ["GOOGLE_CLOUD_PROJECT"], location=os.environ["GOOGLE_CLOUD_LOCATION"])
@@ -257,6 +275,12 @@ def validate_message(message):
     
     return True, None
 
+
+# Add a test endpoint to verify CORS
+@app.route('/api/test', methods=['OPTIONS'])
+def test_cors():
+    return jsonify({"message": "CORS is working"}), 200
+
 @app.route('/api/chat', methods=['POST'])
 @require_api_key
 def chat():
@@ -314,10 +338,21 @@ def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
+    # for production
+    if os.environ.get('FLASK_ENV') == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        response.headers['Content-Security-Policy'] = "default-src 'self'"
     return response
 # Start cleanup thread when app starts
 cleanup_thread = Thread(target=cleanup_storage, daemon=True)
 cleanup_thread.start()
+
+@app.before_request
+def log_request_info():
+    print('Headers:', dict(request.headers))
+    print('Method:', request.method)
+    print('Origin:', request.headers.get('Origin'))
+    print('Allowed Origins:', ALLOWED_ORIGINS)
 
 if __name__ == '__main__':
     # For development only
