@@ -17,10 +17,14 @@ import random
 import string
 from datetime import datetime
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 import re
+from functools import wraps
+from threading import Thread
+import time
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -152,8 +156,86 @@ graph = graph_builder.compile(checkpointer=memory)
 # Add these constants at the top of your file
 MAX_MESSAGE_LENGTH = 100
 MIN_MESSAGE_LENGTH = 2
-MAX_REQUESTS_PER_MINUTE = 30
+MAX_API_REQUESTS_PER_MINUTE = 100
+MAX_USER_REQUESTS_PER_MINUTE = 30
+VALID_API_KEY = set(os.environ.get("VALID_API_KEYS",'').split(','))
+
+# Global dictionaries
+api_key_usage = {}
 request_history = {}
+
+def cleanup_storage():
+    """Periodically cleanup old entries from storage dictionaries"""
+    while True:
+        try:
+            now = datetime.now()
+            # Cleanup api_key_usage
+            for api_key in list(api_key_usage.keys()):
+                api_key_usage[api_key] = [
+                    timestamp for timestamp in api_key_usage[api_key]
+                    if (now - timestamp).seconds < 6000
+                ]
+                if not api_key_usage[api_key]:
+                    del api_key_usage[api_key]
+
+            # Cleanup request_history
+            for thread_id in list(request_history.keys()):
+                request_history[thread_id] = [
+                    timestamp for timestamp in request_history[thread_id]
+                    if (now - timestamp).seconds < 6000
+                ]
+                if not request_history[thread_id]:
+                    del request_history[thread_id]
+
+            time.sleep(6000)  # Run cleanup every minute
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+            time.sleep(6000)  # Keep running even if there's an error
+
+
+
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-KEY')
+
+        if not api_key or api_key not in VALID_API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        now = datetime.now()
+        if api_key in api_key_usage:
+
+            api_key_usage[api_key] = [
+                timestamp for timestamp in api_key_usage[api_key]
+                if (now - timestamp).seconds < 60
+            ]
+
+            if len(api_key_usage[api_key]) >= MAX_API_REQUESTS_PER_MINUTE:
+                return jsonify({'error': 'Rate limit exceeded'}), 429
+        
+        api_key_usage[api_key] = api_key_usage.get(api_key, []) + [now]
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def check_rate_limit(thread_id):
+    """Check if the request exceeds rate limit"""
+    now = datetime.now()
+    if thread_id in request_history:
+        # Clean old requests
+        request_history[thread_id] = [
+            timestamp for timestamp in request_history[thread_id] 
+            if (now - timestamp).seconds < 60
+        ]
+        
+        if len(request_history[thread_id]) >= MAX_USER_REQUESTS_PER_MINUTE:
+            return False
+        
+    request_history[thread_id] = request_history.get(thread_id, []) + [now]
+    return True
+
 
 def validate_message(message):
     """Validate the incoming message"""
@@ -175,23 +257,8 @@ def validate_message(message):
     
     return True, None
 
-def check_rate_limit(thread_id):
-    """Check if the request exceeds rate limit"""
-    now = datetime.now()
-    if thread_id in request_history:
-        # Clean old requests
-        request_history[thread_id] = [
-            timestamp for timestamp in request_history[thread_id] 
-            if (now - timestamp).seconds < 60
-        ]
-        
-        if len(request_history[thread_id]) >= MAX_REQUESTS_PER_MINUTE:
-            return False
-        
-    request_history[thread_id] = request_history.get(thread_id, []) + [now]
-    return True
-
 @app.route('/api/chat', methods=['POST'])
+@require_api_key
 def chat():
     try:
         data = request.get_json()
@@ -241,6 +308,16 @@ def chat():
         # Unexpected errors
         print(f"Unexpected Error: {str(e)}")  # Log the error
         return jsonify({'error': 'Internal server error'}), 500
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    return response
+# Start cleanup thread when app starts
+cleanup_thread = Thread(target=cleanup_storage, daemon=True)
+cleanup_thread.start()
 
 if __name__ == '__main__':
     # For development only
