@@ -1,4 +1,3 @@
-
 from langchain_google_vertexai import ChatVertexAI
 from langchain_google_vertexai import VertexAIEmbeddings
 from google.oauth2 import service_account
@@ -16,11 +15,12 @@ from langgraph.checkpoint.memory import MemorySaver
 import vertexai
 import random
 import string
-import datetime
+from datetime import datetime
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 
@@ -149,21 +149,98 @@ memory = MemorySaver()
 graph = graph_builder.compile(checkpointer=memory)
 
 
+# Add these constants at the top of your file
+MAX_MESSAGE_LENGTH = 100
+MIN_MESSAGE_LENGTH = 2
+MAX_REQUESTS_PER_MINUTE = 30
+request_history = {}
+
+def validate_message(message):
+    """Validate the incoming message"""
+    if not isinstance(message, str):
+        return False, "Invalid message format"
+    
+    if not message or not message.strip():
+        return False, "Empty message"
+    
+    if len(message.strip()) < MIN_MESSAGE_LENGTH:
+        return False, "Message too short"
+        
+    if len(message) > MAX_MESSAGE_LENGTH:
+        return False, "Message too long"
+    
+    # Check for potentially harmful content
+    if re.search(r'<[^>]*script', message, re.IGNORECASE):
+        return False, "Invalid message content"
+    
+    return True, None
+
+def check_rate_limit(thread_id):
+    """Check if the request exceeds rate limit"""
+    now = datetime.now()
+    if thread_id in request_history:
+        # Clean old requests
+        request_history[thread_id] = [
+            timestamp for timestamp in request_history[thread_id] 
+            if (now - timestamp).seconds < 60
+        ]
+        
+        if len(request_history[thread_id]) >= MAX_REQUESTS_PER_MINUTE:
+            return False
+        
+    request_history[thread_id] = request_history.get(thread_id, []) + [now]
+    return True
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    data = request.get_json()
-    message = data['message']
-    thread_id = data.get('thread_id')
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
 
-    config = {"configurable": {"thread_id": thread_id}}
-    for step in graph.stream(
-        {"messages": [{"role": "user", "content": message}]},
-        stream_mode="values",
-        config=config,
-    ):
-        response = step["messages"][-1].content
-    return jsonify({'response': response})
+        message = data.get('message')
+        thread_id = data.get('thread_id')
+
+        # Validate thread_id
+        if not thread_id or not isinstance(thread_id, str):
+            return jsonify({'error': 'Invalid thread ID'}), 400
+
+        # Validate message
+        is_valid, error_message = validate_message(message)
+        if not is_valid:
+            return jsonify({'error': error_message}), 400
+
+        # Check rate limiting
+        if not check_rate_limit(thread_id):
+            return jsonify({'error': 'Rate limit exceeded'}), 429
+
+        # Sanitize input
+        sanitized_message = message.strip()
+
+        try:
+            # Process with LLM
+            config = {"configurable": {"thread_id": thread_id}}
+            for step in graph.stream(
+                {"messages": [{"role": "user", "content": sanitized_message}]},
+                stream_mode="values",
+                config=config,
+            ):
+                response = step["messages"][-1].content
+            
+            return jsonify({'response': response})
+            
+        except Exception as e:
+            # This is a true internal server error (LLM processing failed)
+            print(f"LLM Processing Error: {str(e)}")  # Log the error
+            return jsonify({'error': 'Failed to process message'}), 500
+
+    except ValueError as e:
+        # JSON parsing error
+        return jsonify({'error': 'Invalid JSON format'}), 400
+    except Exception as e:
+        # Unexpected errors
+        print(f"Unexpected Error: {str(e)}")  # Log the error
+        return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     # For development only
