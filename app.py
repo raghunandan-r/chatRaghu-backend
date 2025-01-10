@@ -1,3 +1,4 @@
+
 from langchain_google_vertexai import ChatVertexAI
 from langchain_google_vertexai import VertexAIEmbeddings
 from google.oauth2 import service_account
@@ -11,13 +12,20 @@ from langgraph.prebuilt import ToolNode
 from langgraph.graph import END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate
+from langgraph.checkpoint.memory import MemorySaver
+import vertexai
 import random
 import string
 import datetime
 import os
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # This will allow all origins. For production, specify allowed origins
 
 # Initialize VertexAI
 vertexai.init(project=os.environ["GOOGLE_CLOUD_PROJECT"], location=os.environ["GOOGLE_CLOUD_LOCATION"])
@@ -29,7 +37,7 @@ credentials = service_account.Credentials.from_service_account_file(
 embeddings = VertexAIEmbeddings(model_name="text-embedding-004", credentials=credentials)
 
 # Initialize OpenAI
-llm = ChatOpenAI(model="gpt-4-0314")  # Use gpt-4
+llm = ChatOpenAI(model="gpt-4o-mini")  # Use gpt-4
 
 # Initialize Pinecone
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
@@ -43,19 +51,6 @@ os.environ["LANGCHAIN_TRACING_V2"] = "true"
 if not os.environ.get("LANGCHAIN_API_KEY"):
     os.environ["LANGCHAIN_API_KEY"] = getpass.getpass()
 os.environ["USER_AGENT"] = "my-langchain-app/v0.1.0"
-
-# thread_id generator
-
-def generate_thread_id_for_session():
-  """Generates a random 8-character string and appends a UTC timestamp.
-
-  Returns:
-    A string with the format "XXXXXXXX-YYYYMMDDHHMMSS", where X is a random
-    alphanumeric character and Y is a digit from the UTC timestamp.
-  """
-  random_chars = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-  utc_timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
-  return f"{random_chars}-{utc_timestamp}"
 
 
 # setup graph
@@ -153,18 +148,14 @@ graph_builder.add_edge("generate", END)
 memory = MemorySaver()
 graph = graph_builder.compile(checkpointer=memory)
 
-# Specify an ID for the thread
-config = {"configurable": {"thread_id": thread_id}}
-
-graph = graph_builder.compile()
-
 
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
     data = request.get_json()
     message = data['message']
-    thread_id = generate_thread_id_for_session()  # Generate a new thread ID for each session
+    thread_id = data.get('thread_id')
+
     config = {"configurable": {"thread_id": thread_id}}
     for step in graph.stream(
         {"messages": [{"role": "user", "content": message}]},
@@ -175,4 +166,8 @@ def chat():
     return jsonify({'response': response})
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    # For development only
+    app.run(debug=True, host='127.0.0.1', port=8080)
+    
+    # For allowing external access
+    # app.run(debug=False, host='0.0.0.0', port=8080)

@@ -3,7 +3,24 @@ langchain-openai
 langchain-pinecone
 google-cloud-aiplatform
 pinecone
+pinecone-client
 langgraph
 langchain-community
 beautifulsoup4
 flask
+python-dotenv
+flask-cors
+
+# Additional useful dependencies
+requests>=2.31.0          # For making HTTP requests
+pydantic>=2.0.0          # For data validation
+typing-extensions>=4.5.0  # For better type hints
+python-jose>=3.3.0       # If you need JWT token handling
+# gunicorn>=21.2.0         # Production WSGI server
+pytest>=7.4.0            # For testing (if needed)
+black>=23.0.0            # Code formatting (development)
+ruff>=0.1.9              # Fast Python linter (development)
+
+# Optional but recommended for production
+# sentry-sdk               # For error tracking
+# prometheus-client        # For metrics
