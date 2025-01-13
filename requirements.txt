@@ -1,15 +1,15 @@
-langchain-google-vertexai
 langchain-openai
 langchain-pinecone
-google-cloud-aiplatform
 pinecone
 pinecone-client
 langgraph
 langchain-community
-beautifulsoup4
 flask
 python-dotenv
 flask-cors
+# chromadb>=0.4.0
+faiss-cpu>=1.7.4    # CPU version of FAISS
+numpy>=1.23.0       # Required by FAISS
 
 # Additional useful dependencies
 requests>=2.31.0          # For making HTTP requests
