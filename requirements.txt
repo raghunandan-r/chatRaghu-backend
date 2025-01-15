@@ -4,10 +4,9 @@ pinecone
 pinecone-client
 langgraph
 langchain-community
-flask
 python-dotenv
-flask-cors
-# chromadb>=0.4.0
+fastapi
+uvicorn
 faiss-cpu>=1.7.4    # CPU version of FAISS
 numpy>=1.23.0       # Required by FAISS
 
