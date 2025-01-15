@@ -37,7 +37,8 @@ from contextlib import asynccontextmanager
 
 
 load_dotenv('.env')
-load_dotenv('.env.development')
+#load_dotenv('.env.development')
+load_dotenv('.env.production')
 
 # All langchain configuration hereafter
 
@@ -444,10 +445,6 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     
-    if os.environ.get("FLASK_ENV") == "production":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
-    
     return response
 
 
@@ -498,16 +495,14 @@ async def chat(
 async def test_cors():
     return {"message": "CORS is working"}
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8080,
-        reload=True,
-        log_level="info"
-    )
-
-    # For allowing external access
-    # app.run(debug=False, host='0.0.0.0', port=8080)
+# 
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(
+#         "main:app",
+#         host="127.0.0.1",
+#         port=8080,
+#         reload=True,
+#         log_level="info"
+#     )
+# 
