@@ -1,11 +1,12 @@
 # Core LangChain packages (keep strict versions)
-langchain-openai
-langchain-pinecone
-langchain-community
-langgraph
-langchain-core
-openai
-pinecone-client
+langchain-openai==0.3.0
+langchain-pinecone==0.2.2
+langchain-community==0.3.14
+langgraph==0.2.62
+langchain-core==0.3.29
+openai>=1.6.1,<2
+pinecone-client>=3.0.0
+langchain-pinecone==0.2.2
 
 # Dependencies that can be flexible
 distro>=1.8.0
@@ -25,8 +26,8 @@ faiss-cpu==1.7.4
 # Web framework core (keep strict versions)
 fastapi==0.109.0
 uvicorn[standard]==0.27.1
-pydantic==2.5.3
-pydantic-core==2.14.6
+pydantic==2.7.4
+pydantic-core==2.18.4
 
 # Web dependencies (can be flexible)
 click>=8.1.7
@@ -53,7 +54,7 @@ exceptiongroup>=1.0.0
 
 # Testing and Development tools (keep strict versions)
 pytest==7.4.0
-pytest-asyncio>=0.15.1
+pytest-asyncio>=0.20.0
 pytest-cov==2.12.1
 mypy==0.910
 pylint==2.8.0
