@@ -458,7 +458,7 @@ async def add_security_headers(request: Request, call_next):
 
 async def chat(
     request: ChatRequest,
-    api_key: str = Depends(verify_api_key)
+    # api_key: str = Depends(verify_api_key)
 ):
     # Check thread rate limit
     await check_thread_rate_limit(request.thread_id)
