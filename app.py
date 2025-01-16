@@ -31,9 +31,9 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 
-load_dotenv('.env')
-load_dotenv('.env.development')
-#load_dotenv('.env.production')
+#load_dotenv('.env')
+#load_dotenv('.env.development')
+
 
 # All langchain configuration hereafter
 
@@ -490,15 +490,15 @@ async def chat(
 async def test_cors():
     return {"message": "CORS is working"}
 
-# comment out for production
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8080,
-        reload=True,
-        log_level="info"
-    )
-
+## comment out for production
+#
+#if __name__ == "__main__":
+#    import uvicorn
+#    uvicorn.run(
+#        "main:app",
+#        host="127.0.0.1",
+#        port=8080,
+#        reload=True,
+#        log_level="info"
+#    )
+#
