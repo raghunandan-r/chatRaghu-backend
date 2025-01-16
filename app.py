@@ -4,8 +4,7 @@ from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone
 from langgraph.graph import MessagesState, StateGraph
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, trim_messages, filter_messages
-from langgraph.prebuilt import ToolNode
+from langchain_core.messages import HumanMessage, SystemMessage, trim_messages
 from langgraph.graph import END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.prompts import (
@@ -24,21 +23,17 @@ import os
 from dotenv import load_dotenv
 import re
 from threading import Thread
-import time
 from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator, field_validator
-from typing import Optional, List, Dict
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Dict
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 
-
-
 load_dotenv('.env')
-#load_dotenv('.env.development')
-load_dotenv('.env.production')
+load_dotenv('.env.development')
+#load_dotenv('.env.production')
 
 # All langchain configuration hereafter
 
@@ -495,14 +490,15 @@ async def chat(
 async def test_cors():
     return {"message": "CORS is working"}
 
-# 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(
-#         "main:app",
-#         host="127.0.0.1",
-#         port=8080,
-#         reload=True,
-#         log_level="info"
-#     )
-# 
+# comment out for production
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",
+        port=8080,
+        reload=True,
+        log_level="info"
+    )
+

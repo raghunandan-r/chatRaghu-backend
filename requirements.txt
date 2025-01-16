@@ -1,25 +1,61 @@
+# Core LangChain packages (keep strict versions)
 langchain-openai
 langchain-pinecone
-pinecone
-pinecone-client
-langgraph
 langchain-community
-python-dotenv
-fastapi
-uvicorn
-faiss-cpu>=1.7.4    # CPU version of FAISS
-numpy>=1.23.0       # Required by FAISS
+langgraph
+langchain-core
+openai
+pinecone-client
 
-# Additional useful dependencies
-requests>=2.31.0          # For making HTTP requests
-pydantic>=2.0.0          # For data validation
-typing-extensions>=4.5.0  # For better type hints
-python-jose>=3.3.0       # If you need JWT token handling
-# gunicorn>=21.2.0         # Production WSGI server
-pytest>=7.4.0            # For testing (if needed)
-black>=23.0.0            # Code formatting (development)
-ruff>=0.1.9              # Fast Python linter (development)
+# Dependencies that can be flexible
+distro>=1.8.0
+tqdm>=4.65.0
+packaging>=23.0
+requests>=2.25.1
+urllib3>=1.26.0
+sqlalchemy>=1.4.0
+aiohttp>=3.7.4
+python-socketio>=5.0.0
+jiter>=0.4.0,<1
 
-# Optional but recommended for production
-# sentry-sdk               # For error tracking
-# prometheus-client        # For metrics
+# Vector stores (keep strict versions)
+
+faiss-cpu==1.7.4
+
+# Web framework core (keep strict versions)
+fastapi==0.109.0
+uvicorn[standard]==0.27.1
+pydantic==2.5.3
+pydantic-core==2.14.6
+
+# Web dependencies (can be flexible)
+click>=8.1.7
+h11>=0.14.0
+httptools>=0.6.1
+python-multipart>=0.0.7
+websockets>=11.0.3
+httpx>=0.24.1
+httpcore>=0.17.0
+certifi>=2023.7.22
+importlib-metadata>=6.0.0
+charset-normalizer>=2.0.0
+starlette>=0.35.0
+
+# Core dependencies (can be flexible)
+python-dotenv>=1.0.0
+numpy>=1.24.3
+typing-extensions>=4.9.0
+annotated-types>=0.5.0
+anyio>=4.2.0
+idna>=3.6
+sniffio>=1.3.0
+exceptiongroup>=1.0.0
+
+# Testing and Development tools (keep strict versions)
+pytest==7.4.0
+pytest-asyncio>=0.15.1
+pytest-cov==2.12.1
+mypy==0.910
+pylint==2.8.0
+black==23.12.1
+ruff==0.1.9

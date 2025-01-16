@@ -1,9 +1,11 @@
 # Ignore credentials directory
 secrets/
 credentials/
+.venv/
 
 # Environment variables
 .env
 *.env
 .env.*
 !.env.example 
+
