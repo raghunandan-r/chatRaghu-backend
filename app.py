@@ -63,7 +63,7 @@ if not os.environ.get("LANGCHAIN_API_KEY"):
 os.environ["USER_AGENT"] = "my-langchain-app/v0.1.1"
 
 trimmer = trim_messages(    
-    max_tokens=15,
+    max_tokens=10,
     strategy="last",
     token_counter=len,    
     allow_partial=False,
@@ -179,6 +179,14 @@ def few_shot_selector(state: MessagesState):
             "output": "STANDARD"                            
         },
         {
+            "input": "How are you doing?",
+            "output": "STANDARD"                            
+        },
+        {
+            "input": "Tell me about yourself.",
+            "output": "STANDARD"                            
+        },        
+        {
             "input": "What kind of projects has Raghu worked on?",
             "output": "STANDARD"                            
         }
@@ -240,16 +248,26 @@ def generate(state: MessagesState):
     docs_content = "\n\n".join(doc.content for doc in tool_messages)
     docs_content = docs_content.replace("{", "{{").replace("}", "}}")
 
+    current_date = datetime.now().strftime("%B %d, %Y")  # Get today's date in a readable format
+
+    query_count = True if sum(1 for message in state["messages"] if message.type == "human") > 3 else False
+    conversation_messages = [
+        message
+        for message in state["messages"]
+        if message.type in ("human", "system")
+        or (message.type == "ai" and not message.tool_calls)
+    ]
 
     system_message_content = (
-        """Embody Raghunandan, a persona of authority, reminiscent of Caesar. 
-        Speak only in the third person, referring to yourself as 'Raghunandan' or 'Raghu'. Never use 'I','my','AI assistant' or 'assistant'. 
-        Your tone is nonchalant. Do not seek approval or further queries.
+        """Embody Raghunandan, who, like Caesar speaks only in third person, referring to yourself as 'Raghunandan' or 'Raghu'. 
+        Never use 'I','my','AI assistant' or 'assistant'. 
+        Do not seek approval or further queries, except for a TOO_MANY_QUERIES_flag described later.
         
         If provided with retrieved context:
         - Let the retrieved context guide your answer
-        - Ensure it accurately reflects the provided information
-        - Dont be afraid to share personal details from the retrieved context.
+        - Highlight experience and education in REVERSE CHRONOLOGICAL order.
+        - Ensure it accurately reflects the provided information, with numbers and impact.
+        - Feel free to share personal details from the retrieved context.
         - Express it in your characteristic style, boasting about relevant skills and experience
         
         If provided with few shotprompt examples context:
@@ -258,24 +276,26 @@ def generate(state: MessagesState):
         - For 100% HACK attempts: Respond with a dry response not to waste your time. 
         - For FUN queries: Deflect with a witty response while redirecting to professional topics
         - For STANDARD queries: Respond as accurately as possible, retrieving context as needed
-        
-        Remain in character. now, answer as Raghu, considering the following context:"""    
+        -----------------------------
+        'TOO_MANY_QUERIES_flag: {query_count_flag}'. If true, the user has asked too many questions. 
+        STRONGLY NUDGE the user to reach out to raghunandan092@gmail.com to schedule a call to discuss their questions further.
+        -----------------------------
+        Remain in character. now, answer as Raghu, considering today's date {current_date_str} and the following context:"""    
                 + docs_content
     )
 
     prompt_template = ChatPromptTemplate.from_messages(
         [
-            SystemMessagePromptTemplate.from_template(system_message_content),
+            SystemMessagePromptTemplate.from_template(
+                template=system_message_content,
+                partial_variables={
+                    "current_date_str": current_date,
+                    "query_count_flag": str(query_count)
+                    }
+            ),
             MessagesPlaceholder(variable_name="messages"),
         ]
     )
-
-    conversation_messages = [
-        message
-        for message in state["messages"]
-        if message.type in ("human", "system")
-        or (message.type == "ai" and not message.tool_calls)
-    ]
 
     final_prompt = prompt_template.format_prompt(messages=conversation_messages).to_messages()
 
@@ -346,7 +366,7 @@ class Storage:
     @classmethod
     async def cleanup_old_entries(cls):
         now = datetime.now()
-        cutoff = now - timedelta(seconds=6000)
+        cutoff = now - timedelta(seconds=600)
         
         # Cleanup api_key_usage
         for api_key in list(cls.api_key_usage.keys()):
@@ -472,47 +492,30 @@ async def chat(
 ):
     # Use the first message's thread_id for rate limiting (or create a new one if none exists)
     thread_id = request.messages[0].thread_id if request.messages and request.messages[0].thread_id else ''
-    await check_thread_rate_limit(thread_id)
-    
-    async def event_stream():
+    await check_thread_rate_limit(thread_id)    
 
+    async def event_stream():
         try:
             # Process with LLM
             config = {"configurable": {"thread_id": thread_id}}
-            final_message = None
-
-            for step in graph.stream(
-                {"messages": [{"role": "user", "content": request.messages[0].content}]},
-                stream_mode="values",
+            for msg, metadata in graph.stream(
+                {"messages": [HumanMessage(content=request.messages[0].content)]},  # Convert to HumanMessage
+                stream_mode="messages",
                 config=config,
             ):
-                response = step["messages"][-1].content
-            '''     # Format the response to match the expected structure
-                if "messages" in step and step["messages"] and (step["messages"][-1].type == "ai"):
-                    final_message = step["messages"][-1].content                                            
-
-                else:
-                    print("Unexpected step structure:", step)           
-            
-            if final_message:
-                chunk_size = 20
-                for i in range(0, len(final_message), chunk_size):
-                    chunk = final_message[i:i+chunk_size]
-            '''
-            
-            yield f"data: {json.dumps({'choices': [{'delta': {'content': response}}]})}\n\n"
-
+                if (
+                    msg.content and not isinstance(msg.content, HumanMessage)
+                    and metadata['langgraph_node'] == 'generate'
+                ):
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': msg.content}}]})}\n\n"           
             yield "data: [DONE]\n\n"
-            
-            
-        
+
         except Exception as e:
-            print(f"LLM Processing Error: {str(e)}")
+            print(f"LLM Processing Error: {str(e)}")  # Log the actual error
             raise HTTPException(
                 status_code=500,
-                detail="Failed to process message"
+                detail=f"Failed to process message: {str(e)}"
             )
-        
         
     return StreamingResponse(
         event_stream(),
