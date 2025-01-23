@@ -60,3 +60,4 @@ mypy==0.910
 pylint==2.8.0
 black==23.12.1
 ruff==0.1.9
+pytest-mock>=3.10.0
