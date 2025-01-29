@@ -91,7 +91,7 @@ def get_example_selector() -> SemanticSimilarityExampleSelector:
                 examples,
                 OpenAIEmbeddings(),
                 FAISS,
-                k=4,
+                k=3,
             )
             logger.info("Example selector cache created", extra={
                 "action": "cache_created",
@@ -120,27 +120,35 @@ def retrieve(query: str):
     try:
         logger.info("Starting retrieval", extra={
             "action": "retrieval_start",
-            "query_length": len(query)
+            "query": query
         })
+
+        query_embedding = embeddings.embed_query(query)
+
         # retrieved_docs = vector_store.similarity_search(query, k=4)
-        retrieved_docs = vector_store.max_marginal_relevance_search(
-            query,
-            k=3,
-            fetch_k=4,
-            lambda_mult=0.6
+        doc_score_pairs = vector_store.similarity_search_by_vector_with_score(
+            embedding=query_embedding,
+            k=3
+            #fetch_k=4,
+            #lambda_mult=0.6
         )
         
         logger.info("Completed retrieval", extra={
             "action": "retrieval_complete",
-            "docs_retrieved": len(retrieved_docs)
+            "docs_retrieved": len(doc_score_pairs)
         })
         
+        # Unpack the tuples and include scores in the output
         serialized = "\n\n".join(
-            (f"Content: {doc.page_content}")
-            for doc in retrieved_docs[:3]
+            f"Content: {doc.page_content} (Score: {score:.2f})"
+            for doc, score in doc_score_pairs
         )
-        return serialized, retrieved_docs[:3]
         
+        # Return just the documents if that's what downstream code expects
+        retrieved_docs = [doc for doc, _ in doc_score_pairs]
+        
+        return serialized, retrieved_docs
+         
     except Exception as e:
         logger.error("Retrieval failed", extra={
             "action": "retrieval_error",
@@ -156,7 +164,7 @@ def relevance_check(state: MessagesState):
         
         logger.info("Starting relevance check", extra={
             "action": "relevance_check_start",
-            "query_length": len(current_query.content) if current_query else 0
+            "query": current_query.content if current_query else ""
         })
         
         system_message_content = ("""
@@ -225,26 +233,31 @@ def query_or_respond(state: MessagesState):
 
     current_query = next((msg for msg in reversed(state["messages"]) if isinstance(msg, HumanMessage)), None)
 
+    logger.info("Processing user query for context check", extra={
+        "action": "query_or_respond_start",
+        "query": current_query.content if current_query else "No query found"
+    })
+
     system_message_content = ("""
                                   You are a routing assistant for a chatbot that answers questions about experience, skills, education, projects or achivements of a person named Raghunandan(Raghu). 
-                                  Your sole task is to determine the availability of context within the current conversation. You must adhere to the following rules:                                
+                                  Your sole task is to determine the availability of context within the current conversation. 
                                 **Rules:**
-                                1. **Context Check:** determine if the current conversation history provides enough context of Raghu's experience, skills, education, projects or achivements to answer the query.
+                                1. **Context Check:** determine if the context provides enough context of Raghu's experience, skills, education, projects or achivements to answer the query.
                                 2. **job application rejectioncheck:** if the user query is about rejecting for a job, it is not relevant to Raghu's profile.
 
                                 **Output:**
                                 Your output MUST be one of the following actions and nothing else:
-                                1. First, check if the answer to the user's question can be derived from the current conversation history.
+                                1. First, check if the answer to the user's question can be derived from the context.
                                 2. If the answer CANNOT be found in the conversation history, use the 'retrieve' tool to fetch relevant information from Raghu's profile.   
                                   
                                 **Important Notes:**
-                                * "You, u, yo" in the user query refers to Raghu. "Your, ur" in the user query refers to Raghu's.
-                                *   DO NOT attempt to answer the user's question. Your only job is to decide to utilize the tool.
+                                * 'You', 'u', 'yo' in the user query refers to Raghu. 'Your', 'ur' in the user query refers to Raghu's.
+                                *   DO NOT attempt to answer the user's question. Your only job is to decide whether to utilize the tool.
                             
                                 ---
                                 User Query: {query}
 
-                                Conversation History:                                
+                                Context:
                                 
                                 """)
     
@@ -257,10 +270,14 @@ def query_or_respond(state: MessagesState):
 
     messages_with_system_prompt = prompt_template.format_messages(query=current_query.content, messages=state["messages"])
 
-
-
     llm_with_tools = llm.bind_tools([retrieve])
     response = llm_with_tools.invoke(messages_with_system_prompt)
+
+    logger.info("Completed processing user query", extra={
+        "action": "query_or_respond_complete",
+        "response": response
+    })
+
     return {"messages": [response]}
 
 
@@ -353,6 +370,11 @@ async def few_shot_selector(state: MessagesState):
 
     current_query = next((msg for msg in reversed(state["messages"]) if isinstance(msg, HumanMessage)), None)
 
+    logger.info("Starting few shot selection process", extra={
+        "action": "few_shot_selector_start",
+        "query": current_query.content if current_query else "No query found"
+    })
+
     # Create a few-shot prompt for the classification LLM
     few_shot_prompt = FewShotPromptTemplate(
         example_selector=example_selector,
@@ -378,7 +400,7 @@ async def few_shot_selector(state: MessagesState):
     )
     
     prompt_with_examples = few_shot_prompt.format(query=current_query.content, current_date_str=current_date)
-    # final_prompt = [SystemMessage(content=prompt_with_examples)] + state["messages"]
+
     # Create a chat prompt template with proper message structure
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(prompt_with_examples),
@@ -387,6 +409,11 @@ async def few_shot_selector(state: MessagesState):
     # Format the prompt with the conversation history
     final_prompt = prompt_template.format_messages(chat_history=state["messages"])
     response = await llm.ainvoke(final_prompt)
+
+    logger.info("Completed few shot selection process", extra={
+        "action": "few_shot_selector_complete",
+        "response": response
+    })
 
     return {"messages": [response]}
 
