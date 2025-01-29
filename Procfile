@@ -1,1 +1,1 @@
-web: gunicorn app:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 60 --keep-alive 15 --log-level info
+web: gunicorn app:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --timeout 60 --keep-alive 15 --log-level info --max-requests 1000 --max-requests-jitter 50

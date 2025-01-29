@@ -4,9 +4,8 @@ langchain-pinecone==0.2.2
 langchain-community==0.3.14
 langgraph==0.2.62
 langchain-core==0.3.29
-openai>=1.6.1,<2
-pinecone-client>=3.0.0
-langchain-pinecone==0.2.2
+openai>=1.60.2
+pinecone-client==3.0.0
 
 # Dependencies that can be flexible
 distro>=1.8.0
@@ -25,7 +24,7 @@ faiss-cpu==1.7.4
 
 # Web framework core (keep strict versions)
 fastapi==0.109.0
-uvicorn[standard]>=0.27.0
+uvicorn[standard]==0.27.0
 pydantic==2.7.4
 pydantic-core==2.18.4
 
@@ -54,14 +53,13 @@ exceptiongroup>=1.0.0
 
 # Testing and Development tools (keep strict versions)
 pytest==7.4.0
-pytest-asyncio>=0.20.0
+pytest-asyncio==0.20.0
 pytest-cov==2.12.1
-mypy==0.910
-pylint==2.8.0
+mypy==0.991
+pylint==2.17.5
 black==23.12.1
 ruff==0.1.9
-pytest-mock>=3.10.0
-python-json-logger>=2.0.7
-structlog>=23.1.0
-
-gunicorn>=21.2.0
+pytest-mock==3.10.0
+python-json-logger==2.0.7
+structlog==23.1.0
+gunicorn==21.2.0
