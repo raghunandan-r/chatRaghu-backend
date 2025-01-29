@@ -28,7 +28,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import asyncio
 from utils.logger import logger
-
+import uuid
 
 
 # load_dotenv('.env')
@@ -122,8 +122,8 @@ def retrieve(query: str):
             "action": "retrieval_start",
             "query_length": len(query)
         })
-        # retrieved_docs = await vector_store.asimilarity_search(query, k=4)
-        reranked_docs = vector_store.max_marginal_relevance_search(
+        # retrieved_docs = vector_store.similarity_search(query, k=4)
+        retrieved_docs = vector_store.max_marginal_relevance_search(
             query,
             k=3,
             fetch_k=4,
@@ -132,14 +132,14 @@ def retrieve(query: str):
         
         logger.info("Completed retrieval", extra={
             "action": "retrieval_complete",
-            "docs_retrieved": len(reranked_docs)
+            "docs_retrieved": len(retrieved_docs)
         })
         
         serialized = "\n\n".join(
             (f"Content: {doc.page_content}")
-            for doc in reranked_docs[:3]
+            for doc in retrieved_docs[:3]
         )
-        return serialized, reranked_docs[:3]
+        return serialized, retrieved_docs[:3]
         
     except Exception as e:
         logger.error("Retrieval failed", extra={
@@ -453,7 +453,7 @@ async def generate_with_retrieved_context(state: MessagesState):
 async def generate_with_persona(state: MessagesState):
     """Generate response in persona."""
     try:
-        query_count = sum(1 for message in state["messages"] if message.type == "human") > 6
+        query_count = sum(1 for message in state["messages"] if message.type == "human") > 3
         messages = state["messages"]
         last_ai_message = None
         filtered_messages = []
@@ -470,20 +470,21 @@ async def generate_with_persona(state: MessagesState):
         
         persona_message_content = (
             """
-                You are a stylistic layer to the existing AI response, speaking in Raghunandan's persona. DO NOT alter any factual information from previous AI responses.
+                You are a stylistic layer to the existing AI response, speaking in Raghunandan's persona. 
 
                 STYLING RULES:
                 - Speak in an assertive tone, referring to yourself in the third person using 'Raghunandan' or 'Raghu' instead of 'I' or 'my'.
-                - Always stay in character and never use terms like 'AI assistant', 'assistant', 'elaborate further', or 'As previously stated'.
-                - Always strive for accuracy and stay true to the conversation history.
-                - Note, You are courting recruiters, respond with specifics and numbers from the "RETRIEVED CONTEXT" to show impact if available.
-                - If the previous response indicates that the question cannot be answered, briefly acknowledge this in Raghunandan's style without adding filler content.
-                - If the user's query is unrelated to Raghunandan's professional profile, deflect with a witty response.            
+                - STAY in character and never use terms like 'AI assistant', 'assistant', 'elaborate further', or 'As previously stated'.
+                - Always strive for accuracy DO NOT alter any factual information from previous AI responses.
+                - Note, You are courting recruiters, respond with specifics and numbers from the context to show impact if available.
+                - Do not add introductory or transitional phrases. begin the response as if Raghunandan is directly answering the user's query.
 
                 INSTRUCTIONS:
-                - Take the "LAST AI MESSAGE" and rephrase it according to the STYLING RULES, ensuring a seamless and natural response as if spoken by Raghunandan himself.
-                - Do not add any introductory or transitional phrases. Simply begin the response as if Raghunandan is directly answering the user's query.
-                - ONLY IF query_count_flag is set to true (query_count_flag: {query_count_flag}), suggest "you seem to be interested in Raghu's skillset, reach out directly via email @ 'raghunandan092@gmail.com'".
+                - Take the "LAST AI MESSAGE" and rephrase it according to the STYLING RULES
+                - If the previous ai response indicates that the question cannot be answered, acknowledge this in Raghunandan's style without adding filler content.
+                - If the previous ai response starts with 'et, tu Brute', maintain the starting quote and respond.
+                - If the previous ai response indicates that the user's query is unrelated to Raghunandan's professional profile, deflect with a witty response.            
+                - {suggest_email}
 
                 LAST AI MESSAGE: {last_ai_message}
             """
@@ -500,10 +501,11 @@ async def generate_with_persona(state: MessagesState):
         # Format the prompt, filling in the placeholder for the conversation history and last AI message
         final_prompt = prompt_template.format_messages(        
             query_count_flag=str(query_count),
-            last_ai_message=last_ai_message.content
+            last_ai_message=last_ai_message.content,
+            suggest_email = """Add suggestion in response 'you seem to be asking too many questions, why dont you reach out directly via email @ 'raghunandan092@gmail.com'""" if query_count else ""
             #messages=messages[-5:]
         )
-        response = await llm.bind(temperature=0.5).ainvoke(final_prompt)
+        response = await llm.bind(temperature=0.6).ainvoke(final_prompt)
         state["messages"] = trimmer.invoke(state["messages"] + [response])
         
         logger.info("Completed persona generation", extra={
@@ -560,15 +562,13 @@ graph = graph_builder.compile(
     checkpointer=memory
     )
 
-import uuid
-
 #Warm up the cache to load common responses on startup
 async def warm_up_cache():
     """Pre-warm the cache with common responses on startup"""
     doc_id = str(uuid.uuid4())
     try:
         set_llm_cache(InMemoryCache())
-        input_message = "tell me about yourself?"
+        input_message = "Tell me about yourself?"
         config = {"configurable": {"thread_id": doc_id}}
         async for step in graph.astream(
             {"messages": [{"role": "user", "content": input_message}]},
@@ -576,9 +576,9 @@ async def warm_up_cache():
             config=config,
         ):
             step["messages"][-1].pretty_print()
-        print("Cache warmup completed successfully")
+        logger.info("Cache warmup completed successfully")
     except Exception as e:
-        print(f"Cache warmup failed: {str(e)}")
+        logger.error(f"Cache warmup failed: {str(e)}")
 
 
 # If running directly, still allow manual testing
