@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Type, Tuple
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
-
+import time
 import graph.graph as graph
 from graph.graph import warm_up_cache  # Import the warm_up function
 from utils.logger import logger, log_request_info
@@ -222,11 +222,19 @@ async def chat(
                 "is_cached": is_cached
             })
             
+            last_beat = time.time()
+
             async for msg, metadata in graph.graph.astream(
                 messages,
                 stream_mode="messages",
                 config=config,
             ):
+                # Send a heartbeat every 5 seconds if no content has been sent
+                current_time = time.time()
+                if current_time - last_beat >= 3:
+                    yield "event: heartbeat: \n\n"  # Empty SSE message as heartbeat
+                    last_beat = current_time
+            
                 if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
                     logger.debug("Streaming chunk", extra={
                         "thread_id": thread_id,
@@ -235,7 +243,8 @@ async def chat(
                     })
                     content = msg.content
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
-            
+                    last_beat = current_time
+
             logger.info("Stream completed successfully", extra={"thread_id": thread_id})
             yield "data: [DONE]\n\n"
 
