@@ -1,1 +1,1 @@
-web: uvicorn app:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 75
+web: gunicorn app:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 60 --keep-alive 15 --log-level info

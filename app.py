@@ -72,6 +72,9 @@ class Storage:
             if not cls.request_history[thread_id]:
                 del cls.request_history[thread_id]
 
+# Update these constants at the top of your file
+STREAM_TIMEOUT = 15  # 15 seconds timeout
+KEEP_ALIVE_TIMEOUT = 15
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -160,7 +163,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Connection"] = "keep-alive"
-    response.headers["Keep-Alive"] = "timeout=75, max=100"
+    response.headers["Keep-Alive"] = f"timeout={KEEP_ALIVE_TIMEOUT}, max=100"
     return response
 
 @app.middleware("http")
@@ -261,11 +264,16 @@ async def chat(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "Keep-Alive": f"timeout={KEEP_ALIVE_TIMEOUT}, max=100",
             "X-Vercel-AI-Data-Stream": "v1",
-            "X-Cache-Status": "HIT" if is_cached else "MISS",  # Add cache status header
+            "X-Cache-Status": "HIT" if is_cached else "MISS",
             "Access-Control-Allow-Headers": "*"
         }
     )
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 # if __name__ == "__main__":
 #     import uvicorn
