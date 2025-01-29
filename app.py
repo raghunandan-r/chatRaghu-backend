@@ -16,6 +16,7 @@ from functools import wraps
 
 import graph.graph as graph
 from graph.graph import warm_up_cache  # Import the warm_up function
+from utils.logger import logger, log_request_info
 
 # load_dotenv('.env')
 # load_dotenv('.env.development')
@@ -158,9 +159,29 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    
+    response.headers["Connection"] = "keep-alive"
+    response.headers["Keep-Alive"] = "timeout=75, max=100"
     return response
 
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    # Log request
+    request_info = await log_request_info(request)
+    logger.info("Incoming request", extra=request_info)
+    
+    # Process request and measure timing
+    start_time = datetime.now()
+    response = await call_next(request)
+    process_time = (datetime.now() - start_time).total_seconds()
+    
+    # Log response
+    logger.info("Request completed", extra={
+        **request_info,
+        "status_code": response.status_code,
+        "process_time": process_time
+    })
+    
+    return response
 
 # Routes
 @app.post(
@@ -180,8 +201,13 @@ async def chat(
     api_key: str = Depends(verify_api_key)
 ):
     thread_id = request.messages[0].thread_id if request.messages and request.messages[0].thread_id else ''
+    
+    logger.info("Chat request received", extra={
+        "thread_id": thread_id,
+        "message_length": len(request.messages[0].content)
+    })
+    
     await check_thread_rate_limit(thread_id)    
-
     cache_key = f"{request.messages[0].content}"
     is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
 
@@ -189,35 +215,45 @@ async def chat(
         try:
             messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
             config = {"configurable": {"thread_id": thread_id}}
-      
+            
+            logger.debug("Starting graph stream", extra={
+                "thread_id": thread_id,
+                "is_cached": is_cached
+            })
+            
             async for msg, metadata in graph.graph.astream(
                 messages,
                 stream_mode="messages",
                 config=config,
             ):
-                if (
-                    isinstance(msg, graph.AIMessageChunk) 
-                    and metadata['langgraph_node'] == 'generate_with_persona'
-                ):                                       
-                   content = msg.content
-                   yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
+                if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
+                    logger.debug("Streaming chunk", extra={
+                        "thread_id": thread_id,
+                        "node": metadata['langgraph_node'],
+                        "chunk_length": len(msg.content)
+                    })
+                    content = msg.content
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
             
+            logger.info("Stream completed successfully", extra={"thread_id": thread_id})
             yield "data: [DONE]\n\n"
 
+        except asyncio.TimeoutError:
+            logger.error("Stream timeout", extra={"thread_id": thread_id})
+            raise HTTPException(status_code=499, detail="Stream timed out")
         except asyncio.CancelledError:
-            print("Stream was cancelled")
-            raise HTTPException(
-                status_code=499,
-                detail="Stream was cancelled by client"
-            )
+            logger.warning("Stream cancelled by client", extra={"thread_id": thread_id})
+            raise HTTPException(status_code=499, detail="Stream was cancelled by client")
         except Exception as e:
-            print(f"Error details: {str(e.__class__.__name__)}: {str(e)}")
-            print(f"Error occurred in graph execution at: {e.__traceback__.tb_lineno}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to process message: {str(e)}"
+            logger.exception(
+                "Stream error",
+                extra={
+                    "thread_id": thread_id,
+                    "error_type": e.__class__.__name__,
+                    "error_line": e.__traceback__.tb_lineno
+                }
             )
+            raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
 
     return StreamingResponse(
         event_stream(),
