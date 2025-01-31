@@ -254,17 +254,17 @@ async def chat(
                     }
                 )
                 
-                # Heartbeat logic
-                if current_time - last_beat >= 5:
-                    logger.debug(
-                        "Sending heartbeat",
-                        extra={
-                            "thread_id": thread_id,
-                            "time_since_start": current_time - start_time,
-                        }
-                    )
-                    yield "data: \n\n"
-                    last_beat = current_time
+                # # Heartbeat logic
+                # if current_time - last_beat >= 5:
+                #     logger.debug(
+                #         "Sending heartbeat",
+                #         extra={
+                #             "thread_id": thread_id,
+                #             "time_since_start": current_time - start_time,
+                #         }
+                #     )
+                #     yield "data: \n\n"
+                #     last_beat = current_time
             
                 if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
                     logger.debug("Streaming chunk", extra={
@@ -279,20 +279,20 @@ async def chat(
             logger.info("Stream completed successfully", extra={"thread_id": thread_id})
             yield "data: [DONE]\n\n"
 
-            # Add run tracking
-            run = client.run_create(
-                name="chat_completion",
-                inputs={"messages": request.messages},
-                run_type="chain",
-                tags=["production", "chat"]
-            )
+            # # Add run tracking
+            # run = client.run_create(
+            #     name="chat_completion",
+            #     inputs={"messages": request.messages},
+            #     run_type="chain",
+            #     tags=["production", "chat"]
+            # )
             
-            # Update run with results
-            client.run_update(
-                run.id,
-                outputs={"response": "Final response text"},
-                end_time=datetime.now()
-            )
+            # # Update run with results
+            # client.run_update(
+            #     run.id,
+            #     outputs={"response": "Final response text"},
+            #     end_time=datetime.now()
+            # )
             
         except asyncio.TimeoutError:
             logger.error("Stream timeout", extra={"thread_id": thread_id})

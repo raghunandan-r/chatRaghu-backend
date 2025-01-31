@@ -444,19 +444,16 @@ async def generate_with_retrieved_context(state: MessagesState):
             4. Do not use any external knowledge or information.
         """
         )
-        # Optimize prompt creation
-        messages = [
-            SystemMessagePromptTemplate.from_template(
-                template=system_message_content,
-                additional_kwargs={
-                    "current_date_str": current_date, 
-                    "docs_content": docs_content
-                    }
-            ),
-            HumanMessagePromptTemplate.from_template("{query}")
-        ]
         
-        prompt_template = ChatPromptTemplate.from_messages(messages)
+        prompt_template = ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_message_content.format(
+                current_date_str=current_date,
+                query=user_query.content,
+                docs_content=docs_content
+            )),
+            HumanMessagePromptTemplate.from_template("{query}")
+        ])
+
         final_prompt = prompt_template.format_messages(query=user_query.content, current_date_str=current_date)
         response = await llm.bind(temperature=0.0).ainvoke(final_prompt)        
         

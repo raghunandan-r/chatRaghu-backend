@@ -13,7 +13,6 @@ env_path = project_root / '.env'
 load_dotenv(env_path)
 
 
-async def run_graph()
 
 
 async def run_evaluations():
