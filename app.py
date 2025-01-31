@@ -17,6 +17,7 @@ from graph.graph import warm_up_cache  # Import the warm_up function
 from utils.logger import logger, log_request_info
 from langsmith import Client
 # from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
+import sys
 
 
 # load_dotenv('.env')
@@ -308,11 +309,12 @@ async def chat(
                     "total_chars_sent": total_chars,
                     "error_type": type(e).__name__,
                     "error_details": str(e),
+                    "cancel_scope": str(e.args[0]) if e.args else "unknown",
                     "client_headers": request.headers.get("user-agent", "unknown"),
-                    "client_ip": request.client.host if request.client else "unknown",
                 }
             )
-            raise
+            sys.stdout.flush()
+            raise HTTPException(status_code=499, detail="Stream was cancelled by client")
         except Exception as e:
             logger.error(
                 "Stream error",
