@@ -1,0 +1,22 @@
+{
+  "test_cases": [
+    {
+      "input": {
+        "messages": [{"role": "user", "content": "What are your technical skills?"}]
+      },
+      "expected_output": {
+        "contains_skills": true,
+        "maintains_persona": true
+      }
+    },
+    {
+      "input": {
+        "messages": [{"role": "user", "content": "Tell me about your experience with Python"}]
+      },
+      "expected_output": {
+        "contains_skills": true,
+        "maintains_persona": true
+      }
+    }
+  ]
+} 

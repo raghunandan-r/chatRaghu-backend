@@ -15,6 +15,9 @@ import time
 import graph.graph as graph
 from graph.graph import warm_up_cache  # Import the warm_up function
 from utils.logger import logger, log_request_info
+from langsmith import Client
+# from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
+
 
 # load_dotenv('.env')
 # load_dotenv('.env.development')
@@ -212,8 +215,15 @@ async def chat(
     cache_key = f"{request.messages[0].content}"
     is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
 
+    client = Client()
+
     async def event_stream():
         try:
+            start_time = time.time()
+            last_beat = start_time
+            chunk_count = 0
+            total_chars = 0
+            
             messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
             config = {"configurable": {"thread_id": thread_id}}
             
@@ -222,17 +232,38 @@ async def chat(
                 "is_cached": is_cached
             })
             
-            last_beat = time.time()
-
             async for msg, metadata in graph.graph.astream(
                 messages,
                 stream_mode="messages",
                 config=config,
             ):
-                # Send a heartbeat every 5 seconds if no content has been sent
                 current_time = time.time()
-                if current_time - last_beat >= 3:
-                    yield "event: heartbeat: \n\n"  # Empty SSE message as heartbeat
+                chunk_count += 1
+                total_chars += len(str(msg))
+                
+                # Detailed logging for each chunk
+                logger.debug(
+                    "Streaming chunk", 
+                    extra={
+                        "thread_id": thread_id,
+                        "chunk_number": chunk_count,
+                        "chunk_size": len(str(msg)),
+                        "total_chars": total_chars,
+                        "time_since_start": current_time - start_time,
+                        "time_since_last": current_time - last_beat,
+                    }
+                )
+                
+                # Heartbeat logic
+                if current_time - last_beat >= 5:
+                    logger.debug(
+                        "Sending heartbeat",
+                        extra={
+                            "thread_id": thread_id,
+                            "time_since_start": current_time - start_time,
+                        }
+                    )
+                    yield "data: \n\n"
                     last_beat = current_time
             
                 if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
@@ -248,22 +279,52 @@ async def chat(
             logger.info("Stream completed successfully", extra={"thread_id": thread_id})
             yield "data: [DONE]\n\n"
 
+            # Add run tracking
+            run = client.run_create(
+                name="chat_completion",
+                inputs={"messages": request.messages},
+                run_type="chain",
+                tags=["production", "chat"]
+            )
+            
+            # Update run with results
+            client.run_update(
+                run.id,
+                outputs={"response": "Final response text"},
+                end_time=datetime.now()
+            )
+            
         except asyncio.TimeoutError:
             logger.error("Stream timeout", extra={"thread_id": thread_id})
             raise HTTPException(status_code=499, detail="Stream timed out")
-        except asyncio.CancelledError:
-            logger.warning("Stream cancelled by client", extra={"thread_id": thread_id})
-            raise HTTPException(status_code=499, detail="Stream was cancelled by client")
+        except asyncio.CancelledError as e:
+            elapsed_time = time.time() - start_time
+            logger.warning(
+                "Stream cancelled",
+                extra={
+                    "thread_id": thread_id,
+                    "total_duration": elapsed_time,
+                    "chunks_sent": chunk_count,
+                    "total_chars_sent": total_chars,
+                    "error_type": type(e).__name__,
+                    "error_details": str(e),
+                    "client_headers": request.headers.get("user-agent", "unknown"),
+                    "client_ip": request.client.host if request.client else "unknown",
+                }
+            )
+            raise
         except Exception as e:
-            logger.exception(
+            logger.error(
                 "Stream error",
                 extra={
                     "thread_id": thread_id,
-                    "error_type": e.__class__.__name__,
-                    "error_line": e.__traceback__.tb_lineno
+                    "error_type": type(e).__name__,
+                    "error_details": str(e),
+                    "chunks_sent": chunk_count,
+                    "total_duration": time.time() - start_time,
                 }
             )
-            raise HTTPException(status_code=500, detail=f"Failed to process message: {str(e)}")
+            raise
 
     return StreamingResponse(
         event_stream(),
