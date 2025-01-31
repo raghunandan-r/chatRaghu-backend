@@ -30,10 +30,12 @@ from datetime import datetime
 import asyncio
 from utils.logger import logger
 import uuid
+from sentry_sdk import capture_exception, capture_message
 
 
-# load_dotenv('.env')
-# load_dotenv('.env.development')
+if os.path.exists('.env'):
+    load_dotenv('.env')
+    load_dotenv('.env.development')
 
 
 
@@ -112,6 +114,7 @@ def get_example_selector() -> SemanticSimilarityExampleSelector:
             "error": str(e),
             "error_type": e.__class__.__name__
         })
+        capture_exception(e)
         raise
 
 
@@ -156,6 +159,7 @@ def retrieve(query: str):
             "error": str(e),
             "error_type": e.__class__.__name__
         })
+        capture_exception(e)
         raise
 
 
@@ -212,6 +216,7 @@ def relevance_check(state: MessagesState):
             "error": str(e),
             "error_type": e.__class__.__name__
         })
+        capture_exception(e)
         raise
 
 def relevance_condition(state: MessagesState) -> str:
@@ -470,6 +475,7 @@ async def generate_with_retrieved_context(state: MessagesState):
             "error": str(e),
             "error_type": e.__class__.__name__
         })
+        capture_exception(e)
         raise
 
 
@@ -539,6 +545,7 @@ async def generate_with_persona(state: MessagesState):
             "error": str(e),
             "error_type": e.__class__.__name__
         })
+        capture_exception(e)
         raise
 
 

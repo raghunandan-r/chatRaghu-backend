@@ -67,3 +67,6 @@ gunicorn==21.2.0
 
 # LangSmith dependency
 langsmith==0.2.11
+
+# logging
+sentry-sdk[fastapi]==2.20.0

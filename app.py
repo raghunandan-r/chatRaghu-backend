@@ -17,11 +17,34 @@ from graph.graph import warm_up_cache  # Import the warm_up function
 from utils.logger import logger, log_request_info
 from langsmith import Client
 # from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
+import uvicorn
 import sys
+import sentry_sdk
+from sentry_sdk import capture_exception, capture_message
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
 
 
-# load_dotenv('.env')
-# load_dotenv('.env.development')
+# Load .env files only if they exist
+if os.path.exists('.env'):
+    load_dotenv('.env')
+    load_dotenv('.env.development')
+else:
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN"),    
+        environment="production",  
+        traces_sample_rate=1.0,   
+        profiles_sample_rate=1.0, 
+        integrations=[
+            FastApiIntegration(),
+            AsyncioIntegration(),
+        ],
+        send_default_pii=True,
+        _experiments={
+            "continuous_profiling_auto_start": True,        
+        },
+    )
+
 
 class ClientMessage(BaseModel):
     role: str
@@ -81,13 +104,18 @@ KEEP_ALIVE_TIMEOUT = 15
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    cleanup_thread = Thread(target=Storage.cleanup_old_entries, daemon=True)
-    cleanup_thread.start()        
+    # Startup
+    cleanup_task = asyncio.create_task(Storage.cleanup_old_entries())  # Schedule the cleanup task
     # print("Warming up LLM cache...")
     # await warm_up_cache()
      
     yield
     # Shutdown (if needed)
+    cleanup_task.cancel()  # Cancel the cleanup task if the app is shutting down
+    try:
+        await cleanup_task  # Await the task to ensure it finishes
+    except asyncio.CancelledError:
+        logger.warning("Cleanup task was cancelled")
 
 # Initialize FastAPI
 app = FastAPI(
@@ -170,6 +198,9 @@ async def add_security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
+    if request.url.path == "/favicon.ico":
+        return await call_next(request)
+
     # Log request
     request_info = await log_request_info(request)
     logger.info("Incoming request", extra=request_info)
@@ -254,18 +285,6 @@ async def chat(
                         "time_since_last": current_time - last_beat,
                     }
                 )
-                
-                # # Heartbeat logic
-                # if current_time - last_beat >= 5:
-                #     logger.debug(
-                #         "Sending heartbeat",
-                #         extra={
-                #             "thread_id": thread_id,
-                #             "time_since_start": current_time - start_time,
-                #         }
-                #     )
-                #     yield "data: \n\n"
-                #     last_beat = current_time
             
                 if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
                     logger.debug("Streaming chunk", extra={
@@ -297,36 +316,45 @@ async def chat(
             
         except asyncio.TimeoutError:
             logger.error("Stream timeout", extra={"thread_id": thread_id})
+            capture_exception(asyncio.TimeoutError)
             raise HTTPException(status_code=499, detail="Stream timed out")
+
         except asyncio.CancelledError as e:
             elapsed_time = time.time() - start_time
-            logger.warning(
-                "Stream cancelled",
-                extra={
-                    "thread_id": thread_id,
-                    "total_duration": elapsed_time,
-                    "chunks_sent": chunk_count,
-                    "total_chars_sent": total_chars,
-                    "error_type": type(e).__name__,
-                    "error_details": str(e),
-                    "cancel_scope": str(e.args[0]) if e.args else "unknown",
-                    "client_headers": request.headers.get("user-agent", "unknown"),
-                }
-            )
+            error_context = {
+                "thread_id": thread_id,
+                "total_duration": elapsed_time,
+                "chunks_sent": chunk_count,
+                "total_chars_sent": total_chars,
+                "error_type": type(e).__name__,
+                "error_details": str(e),
+                "cancel_scope": str(e.args[0]) if e.args else "unknown",
+                "client_headers": request.headers.get("user-agent", "unknown"),
+                "traceback": e.__traceback__,  # Include full traceback
+            }            
+            logger.warning("Stream cancelled", extra=error_context)            
+            with sentry_sdk.push_scope() as scope:
+                for key, value in error_context.items():
+                    scope.set_extra(key, value)
+                sentry_sdk.capture_exception(e)
             sys.stdout.flush()
             raise HTTPException(status_code=499, detail="Stream was cancelled by client")
+
         except Exception as e:
-            logger.error(
-                "Stream error",
-                extra={
-                    "thread_id": thread_id,
-                    "error_type": type(e).__name__,
-                    "error_details": str(e),
-                    "chunks_sent": chunk_count,
-                    "total_duration": time.time() - start_time,
-                }
-            )
-            raise
+            error_context = {
+                "thread_id": thread_id,
+                "error_type": type(e).__name__,
+                "error_details": str(e),
+                "chunks_sent": chunk_count,
+                "total_duration": time.time() - start_time,
+                "traceback": e.__traceback__,
+            }
+            logger.error("Stream error", extra=error_context)
+            with sentry_sdk.push_scope() as scope:
+                for key, value in error_context.items():
+                    scope.set_extra(key, value)
+                sentry_sdk.capture_exception(e)                
+            raise            
 
     return StreamingResponse(
         event_stream(),
@@ -345,13 +373,14 @@ async def chat(
 async def health_check():
     return {"status": "healthy"}
 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(
-#         "main:app",
-#         host="127.0.0.1",
-#         port=8080,
-#         reload=True,
-#         log_level="info"
-#     )
+if __name__ == "__main__":
+    
+    if os.path.exists('.env'):
+        uvicorn.run(
+            "main:app",
+            host="127.0.0.1",
+            port=8080,
+            reload=True,
+            log_level="info"
+        )
 
