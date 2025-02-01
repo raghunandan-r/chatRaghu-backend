@@ -329,16 +329,24 @@ async def chat(
                 "error_type": type(e).__name__,
                 "error_details": str(e),
                 "cancel_scope": str(e.args[0]) if e.args else "unknown",
-                "client_headers": request.headers.get("user-agent", "unknown"),
-                "traceback": e.__traceback__,  # Include full traceback
-            }            
-            logger.warning("Stream cancelled", extra=error_context)            
+                "task_name": asyncio.current_task().get_name() if asyncio.current_task() else "unknown",
+                "pending_tasks": len(asyncio.all_tasks()),
+                "execution_point": "generate_with_retrieved_context" if "generate_with_retrieved_context" in str(e.__traceback__) else "unknown",
+                "traceback": e.__traceback__,
+            }
+            
+            logger.warning("Stream cancelled", extra=error_context)
+            
             with sentry_sdk.push_scope() as scope:
+                scope.set_tag("cancel_type", "pregel_cancellation")
                 for key, value in error_context.items():
                     scope.set_extra(key, value)
                 sentry_sdk.capture_exception(e)
-            sys.stdout.flush()
-            raise HTTPException(status_code=499, detail="Stream was cancelled by client")
+            
+            raise HTTPException(
+                status_code=499, 
+                detail=f"Stream cancelled during {error_context['execution_point']}"
+            )
 
         except Exception as e:
             error_context = {
