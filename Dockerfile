@@ -9,4 +9,6 @@ COPY . .
 
 EXPOSE 8080
 
+ENV PYTHONUNBUFFERED=1
+
 CMD ["uvicorn", "app:application", "--host", "0.0.0.0", "--port", "8080"] 
