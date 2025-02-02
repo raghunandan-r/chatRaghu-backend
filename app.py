@@ -29,7 +29,8 @@ from sentry_sdk.integrations.asyncio import AsyncioIntegration
 if os.path.exists('.env'):
     load_dotenv('.env')
     load_dotenv('.env.development')
-else:
+
+if os.getenv("ENVIRONMENT") == "prod":
     sentry_sdk.init(
         dsn=os.getenv("SENTRY_DSN"),    
         environment="production",  
@@ -381,14 +382,15 @@ async def chat(
 async def health_check():
     return {"status": "healthy"}
 
-if __name__ == "__main__":
-    
-    if os.path.exists('.env'):
-        uvicorn.run(
-            "main:app",
-            host="127.0.0.1",
-            port=8080,
-            reload=True,
-            log_level="info"
-        )
+application = app
 
+if __name__ == "__main__":    
+
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",
+        port=8080,
+        reload=True,
+        log_level="info"
+    )
+        
