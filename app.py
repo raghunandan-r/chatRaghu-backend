@@ -394,3 +394,25 @@ if __name__ == "__main__":
         log_level="info"
     )
         
+
+def check_env_vars():
+    required_vars = [
+        "PINECONE_API_KEY",
+        "OPENAI_API_KEY",
+        "VALID_API_KEYS",
+        "ALLOWED_ORIGINS",
+        "SENTRY_DSN",
+        "LANGCHAIN_TRACING_V2",
+        "LANGCHAIN_ENDPOINT",
+        "LANGCHAIN_API_KEY",
+        "LANGCHAIN_PROJECT"
+        # ... add other required vars
+    ]
+    missing = [var for var in required_vars if var not in os.environ]
+    if missing:
+        print(f"Missing environment variables: {missing}")
+        print(f"Available environment variables: {list(os.environ.keys())}")
+        raise ValueError(f"Missing required environment variables: {missing}")
+
+check_env_vars()
+        
