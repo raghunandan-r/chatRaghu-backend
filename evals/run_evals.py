@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from langsmith import Client
-from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
-import graph.graph as graph  # Import your existing graph
-
+from evals.evaluators import correctness, groundedness, relevance, retrieval_relevance
+from graph.graph import get_graph 
+from utils.logger import logger
 # Load environment variables from .env file
 # Get the project root directory (assuming evals is in project root)
 project_root = Path(__file__).parent.parent
@@ -21,32 +21,40 @@ async def run_evaluations():
         raise ValueError("LANGCHAIN_API_KEY not found in environment variables")
     
     client = Client()
-    
-    # Debug prints
-    print("Graph object type:", type(graph))
-    print("Graph object:", graph)
-    
+   
     # Load test cases
     with open(project_root / "evals/datasets/test_cases.json") as f:
-        test_cases = json.load(f)["test_cases"]
+        test_cases = json.load(f).get("test_cases", [])
+    inputs = []
+    outputs = []
+    for idx, case in enumerate(test_cases):
+        question = case.get("question")
+        answer = case.get("answer")
+        inputs.append({"question": question})
+        outputs.append({"answer": answer})
+    dataset = client.create_dataset(dataset_name="Raghu's Q&A")
+    client.create_examples(
+        inputs=inputs, 
+        outputs=outputs, 
+        dataset_id=dataset.id,
+    )      
     
-    evaluators = [RaghuPersonaEvaluator(), RelevanceEvaluator()]
-    
-    # Debug print before evaluate
-    print("About to call evaluate with:", {
-        "target": graph,
-        "dataset": test_cases,
-        "evaluators": evaluators
-    })
-    
+    async def run_graph(inputs: dict) -> dict:
+        """Run graph and track the trajectory it takes along with the final response."""
+        result = await get_graph().ainvoke({"messages": [
+            { "role": "user", "content": inputs['question']},
+        ]}, config={"env": "test"})
+        return {"response": result["followup"]}
+
     experiment_results = client.evaluate(
-        target=graph,  # Your chat implementation
-        dataset=test_cases,
-        evaluators=evaluators,
-        experiment_prefix="raghu-chat-evaluation",
-        max_concurrency=2
+        run_graph,
+        data=test_cases,
+        evaluators=[correctness, groundedness, relevance, retrieval_relevance],
+        experiment_prefix="rag-doc-relevance",
+        metadata={"version": "LCEL context, gpt-4-0125-preview"},
     )
-    
+    # Explore results locally as a dataframe if you have pandas installed
+    # experiment_results.to_pandas()
     return experiment_results
 
 if __name__ == "__main__":
