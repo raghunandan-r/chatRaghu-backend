@@ -32,6 +32,7 @@ from utils.logger import logger
 import uuid
 from sentry_sdk import capture_exception, capture_message
 import json
+import re
 
 
 if os.path.exists('.env'):
@@ -129,6 +130,30 @@ def get_example_selector() -> SemanticSimilarityExampleSelector:
         raise
 
 
+# Precompile regex patterns for performance
+_whitespace_pattern = re.compile(r'\s+')
+_xml_tag_pattern = re.compile(r'<[^>]+>')
+# Pattern to remove the <questions>...</questions> and <tags>...</tags> sections (case insensitive, across multiple lines)
+_special_section_pattern = re.compile(r'<(?:questions|tags)>.*?</(?:questions|tags)>', re.IGNORECASE | re.DOTALL)
+
+def preprocess_text(text: str) -> str:
+    """
+    Preprocess the input text by performing the following steps:
+    
+    1. Remove entire sections along with their content for <questions>...</questions> and <tags>...</tags>.
+    2. Remove any remaining XML tags.
+    3. Normalize whitespace.
+    
+    This meets the requirement of cleaning the text for downstream processing.
+    """
+    # First, remove the special XML sections along with their content
+    text = _special_section_pattern.sub('', text)
+    # Remove all remaining XML tags
+    text = _xml_tag_pattern.sub('', text)
+    # Normalize whitespace
+    return _whitespace_pattern.sub(' ', text).strip()
+
+
 @tool(response_format="content_and_artifact")
 def retrieve(query: str):
     """Retrieve information related to a query."""
@@ -140,7 +165,7 @@ def retrieve(query: str):
 
         query_embedding = embeddings.embed_query(query)
 
-        # retrieved_docs = vector_store.similarity_search(query, k=4)
+        # Retrieve documents along with their scores.
         doc_score_pairs = vector_store.similarity_search_by_vector_with_score(
             embedding=query_embedding,
             k=3
@@ -156,22 +181,23 @@ def retrieve(query: str):
         # Determine the cutoff threshold:
         # Since docs are in decreasing order, the first doc holds the highest score.
         # We filter for docs that are at or above 90% of that top score,
-        # but we also enforce a minimum threshold of 0.69.
+        # but we also enforce a minimum threshold of 0.7.
         if doc_score_pairs:
             best_score = doc_score_pairs[0][1]
             threshold = max(0.7, best_score * 0.9)
         else:
             threshold = 0.7
         
-        # Unpack the tuples and include scores in the output,
-        # retaining only those docs whose score meets the threshold.
-        serialized = "\n\n".join(
-            f"Content: {doc.page_content} (Score: {score:.2f})"
-            for doc, score in doc_score_pairs # if score >= threshold
-        )
+        # Combine the processing for both serialized content and retrieved docs into a single loop.
+        lines = []
+        retrieved_docs = []
+        for doc, score in doc_score_pairs:
+            if score >= threshold:
+                processed_content = preprocess_text(doc.page_content)
+                lines.append(f"Content: {processed_content} (Score: {score:.2f})")
+                retrieved_docs.append(doc)
         
-        # Return just the documents if that's what downstream code expects
-        retrieved_docs = [doc for doc, score in doc_score_pairs] # if score >= threshold]
+        serialized = "\n\n".join(lines)
         
         return serialized, retrieved_docs
          
@@ -385,22 +411,17 @@ async def generate_with_persona(state: MessagesState):
 
         persona_message_content = PROMPT_TEMPLATES["generate_with_persona"]["system_message"].format(
             last_ai_message=last_ai_message.content,
-            suggest_email = """Add suggestion in response 'you seem to be asking too many questions, why dont you reach out directly via email @ 'raghunandan092@gmail.com'""" if query_count else ""
+            suggest_email = (
+                "Suggest 'you seem to be asking too many questions, why dont you reach out directly via email @ raghunandan092@gmail.com"
+                if query_count else ""
+            )
         )
        
         # Create the chat prompt template
         prompt_template = ChatPromptTemplate.from_messages(
-            [
-                SystemMessagePromptTemplate.from_template(persona_message_content)
-            ]
-        )
-        # Format the prompt, filling in the placeholder for the conversation history and last AI message
-        final_prompt = prompt_template.format_messages(        
-            query_count_flag=str(query_count),
-            last_ai_message=last_ai_message.content,
-            suggest_email = """Suggest 'you seem to be asking too many questions, why dont you reach out directly via email @ 'raghunandan092@gmail.com'""" if query_count else ""
-        )
-        response = await llm.bind(temperature=0.6).ainvoke(final_prompt)
+            [SystemMessagePromptTemplate.from_template(persona_message_content)]
+        ).format_messages()
+        response = await llm.bind(temperature=0.6).ainvoke(prompt_template)
         state["messages"] = trimmer.invoke(state["messages"] + [response])
         
         logger.info("Completed persona generation", extra={

@@ -1,0 +1,36 @@
+[33me8ff303[m[33m ([m[1;36mHEAD -> [m[1;32mmaster[m[33m, [m[1;31morigin/eb-master[m[33m, [m[1;32meb-master[m[33m)[m graph refactoring
+[33mf5b91c6[m docker compose port fix
+[33m1ee8f10[m docker debug
+[33m6d427d2[m docker compose fix
+[33m219f36d[m del dockerrun.asw
+[33m56d7a47[m setup for eb deployment
+[33md93e603[m[33m ([m[1;31morigin/master[m[33m)[m sentry debugging
+[33m8b429c8[m sentry integration
+[33mb1bde61[m logging stream cancellation
+[33mcdadbf9[m response gen fix
+[33m7fcd4ab[m logging for cancel stream
+[33md4b244f[m heartbeat
+[33m6e1dc23[m optimized retrieval
+[33m8c72bf1[m retrieval optimization
+[33m08f7423[m railway memory overload fix
+[33m3ca6afc[m timeout 15s
+[33m773f743[m logging & prompt
+[33m06f0786[m refactor graph, streaming and tight prompts
+[33mf66a3d3[m more agentic nodes
+[33m834e61a[m async, nodes, prompt changes
+[33m6ee880f[m streaming support
+[33m799b251[m env variables
+[33m45bd575[m prompt change & setup streaming
+[33mf732c25[m prompt tuning
+[33ma732c85[m handle auth constraint from gh pages
+[33m00b6195[m railway build fail fix1
+[33m91ef671[m railway deployment
+[33m351f221[m railway deployment with new env
+[33m2fec7b7[m vercel setup
+[33mde74901[m rewrote flask to FastAPI
+[33m7304e38[m last flask deployment
+[33mdf22ab1[m few shot prompt examples
+[33m0111fa9[m change graph structure
+[33m3f2fd22[m CORS support
+[33meff9746[m api key and cleanup
+[33mab24f6c[m added server side validations
