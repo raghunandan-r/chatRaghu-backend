@@ -24,6 +24,15 @@ from sentry_sdk import capture_exception, capture_message
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
 
+if sys.platform == 'linux':
+    # Use more performant event loop for Linux
+    from uvloop import EventLoopPolicy
+    asyncio.set_event_loop_policy(EventLoopPolicy())
+else:  # For other platforms
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
+# Set debug mode to catch cancellation sources
+asyncio.get_event_loop().set_debug(True)
 
 # Load .env files only if they exist
 if os.path.exists('.env'):
@@ -37,8 +46,8 @@ if os.getenv("ENVIRONMENT") == "prod":
         traces_sample_rate=1.0,   
         profiles_sample_rate=1.0, 
         integrations=[
-            FastApiIntegration(),
-            AsyncioIntegration(),
+            FastApiIntegration()
+            # AsyncioIntegration(),
         ],
         send_default_pii=True,
         _experiments={
@@ -248,32 +257,34 @@ async def chat(
     cache_key = f"{request.messages[0].content}"
     is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
 
-    client = Client()
-
     async def event_stream():
+        messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
+        config = {"configurable": {"thread_id": thread_id}}
+        stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
         try:
             start_time = time.time()
             last_beat = start_time
             chunk_count = 0
             total_chars = 0
             
-            messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
-            config = {"configurable": {"thread_id": thread_id}}
+            # messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
+            # config = {"configurable": {"thread_id": thread_id}}
             
             logger.debug("Starting graph stream", extra={
                 "thread_id": thread_id,
                 "is_cached": is_cached
             })
             
-            async for msg, metadata in graph.graph.astream(
-                messages,
-                stream_mode="messages",
-                config=config,
-            ):
+            while True:
+                # async for msg, metadata in graph.graph.astream(
+                #     messages,
+                #     stream_mode="messages",
+                #     config=config,
+                # ):
+                msg, metadata = await asyncio.shield(stream_gen.__anext__())
                 current_time = time.time()
                 chunk_count += 1
                 total_chars += len(str(msg))
-                
                 # Detailed logging for each chunk
                 logger.debug(
                     "Streaming chunk", 
@@ -286,7 +297,6 @@ async def chat(
                         "time_since_last": current_time - last_beat,
                     }
                 )
-            
                 if isinstance(msg, graph.AIMessageChunk) and metadata['langgraph_node'] == 'generate_with_persona':
                     logger.debug("Streaming chunk", extra={
                         "thread_id": thread_id,
@@ -299,22 +309,10 @@ async def chat(
 
             logger.info("Stream completed successfully", extra={"thread_id": thread_id})
             yield "data: [DONE]\n\n"
-
-            # # Add run tracking
-            # run = client.run_create(
-            #     name="chat_completion",
-            #     inputs={"messages": request.messages},
-            #     run_type="chain",
-            #     tags=["production", "chat"]
-            # )
             
-            # # Update run with results
-            # client.run_update(
-            #     run.id,
-            #     outputs={"response": "Final response text"},
-            #     end_time=datetime.now()
-            # )
-            
+        except StopAsyncIteration:
+            yield "data: [DONE]\n\n"
+        
         except asyncio.TimeoutError:
             logger.error("Stream timeout", extra={"thread_id": thread_id})
             capture_exception(asyncio.TimeoutError)
@@ -336,8 +334,7 @@ async def chat(
                 "traceback": e.__traceback__,
             }
             
-            logger.warning("Stream cancelled", extra=error_context)
-            
+            logger.warning("Stream cancelled during chunk retrieval", extra=error_context)
             with sentry_sdk.push_scope() as scope:
                 scope.set_tag("cancel_type", "pregel_cancellation")
                 for key, value in error_context.items():
@@ -363,7 +360,9 @@ async def chat(
                 for key, value in error_context.items():
                     scope.set_extra(key, value)
                 sentry_sdk.capture_exception(e)                
-            raise            
+            raise      
+        finally:
+            await stream_gen.aclose()
 
     return StreamingResponse(
         event_stream(),
@@ -391,28 +390,8 @@ if __name__ == "__main__":
         host="127.0.0.1",
         port=8080,
         reload=True,
-        log_level="info"
+        log_level="info",
+        timeout_keep_alive=20,
+        timeout_graceful_shutdown=30
     )
-        
-
-def check_env_vars():
-    required_vars = [
-        "PINECONE_API_KEY",
-        "OPENAI_API_KEY",
-        "VALID_API_KEYS",
-        "ALLOWED_ORIGINS",
-        "SENTRY_DSN",
-        "LANGCHAIN_TRACING_V2",
-        "LANGCHAIN_ENDPOINT",
-        "LANGCHAIN_API_KEY",
-        "LANGCHAIN_PROJECT"
-        # ... add other required vars
-    ]
-    missing = [var for var in required_vars if var not in os.environ]
-    if missing:
-        print(f"Missing environment variables: {missing}")
-        print(f"Available environment variables: {list(os.environ.keys())}")
-        raise ValueError(f"Missing required environment variables: {missing}")
-
-check_env_vars()
         

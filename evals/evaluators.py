@@ -3,6 +3,14 @@ from langsmith import RunEvaluator
 from typing import Optional, Dict, Any
 from langchain_core.messages import BaseMessage
 from typing_extensions import Annotated, TypedDict
+from pathlib import Path
+from dotenv import load_dotenv
+
+
+project_root = Path(__file__).parent.parent
+env_path = project_root / '.env'
+load_dotenv(env_path)
+
 
 # Grade output schema
 class CorrectnessGrade(TypedDict):
@@ -72,7 +80,7 @@ relevance_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structured_output
 def relevance(inputs: dict, outputs: dict) -> bool:
     """A simple evaluator for RAG answer helpfulness."""
     answer = f"""      QUESTION: {inputs['question']}
-            STUDENT ANSWER: {outputs['response']}"""
+            STUDENT ANSWER: {outputs['answer']}"""
     grade = relevance_llm.invoke([{"role": "system", "content": relevance_instructions}, {"role": "user", "content": answer}])
     return grade["relevant"]
 
@@ -104,10 +112,14 @@ grounded_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structured_output(
 # Evaluator
 def groundedness(inputs: dict, outputs: dict) -> bool:
     """A simple evaluator for RAG answer groundedness."""
-    doc_string = "    ".join(doc.page_content for doc in outputs["documents"])
+    # Combine extracted document contents
+    doc_string = "    ".join(doc["page_content"] for doc in outputs["documents"])
     answer = f"""      FACTS: {doc_string}
     STUDENT ANSWER: {outputs['answer']}"""
-    grade = grounded_llm.invoke([{"role": "system", "content": grounded_instructions}, {"role": "user", "content": answer}])
+    grade = grounded_llm.invoke([
+        {"role": "system", "content": grounded_instructions},
+        {"role": "user", "content": answer}
+    ])
     return grade["grounded"]
 
 
@@ -139,7 +151,7 @@ retrieval_relevance_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structu
 
 def retrieval_relevance(inputs: dict, outputs: dict) -> bool:
     """An evaluator for document relevance"""
-    doc_string = " ".join(doc.page_content for doc in outputs["documents"])
+    doc_string = " ".join(doc["page_content"] for doc in outputs["documents"])
     answer = f"""      FACTS: {doc_string}
             QUESTION: {inputs['question']}"""
     # Run evaluator

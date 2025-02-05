@@ -361,12 +361,20 @@ async def generate_with_retrieved_context(state: MessagesState):
        
         docs_content = "\n\n".join(doc.content for doc in tool_messages)
 
-        system_message_content = PROMPT_TEMPLATES["generate_with_retrieved_context"]["system_message"].format(
-            current_date_str=current_date,
-            query=user_query.content,
-            docs_content=docs_content
-        )
-        
+        try:
+            system_message_content = PROMPT_TEMPLATES["generate_with_retrieved_context"]["system_message"].format(
+                current_date_str=current_date,
+                query=user_query.content,
+                docs_content=docs_content
+            )
+        except Exception as e:
+            logger.error("Error formatting system message", extra={
+                "action": "format_system_message_error",
+                "error": str(e),
+                "template": system_message_content
+            })
+            system_message_content = f"Error formatting system message: {e}"
+
         prompt_template = ChatPromptTemplate.from_messages([
             SystemMessage(content=system_message_content),
             HumanMessagePromptTemplate.from_template("{query}")
@@ -389,7 +397,8 @@ async def generate_with_retrieved_context(state: MessagesState):
             "error_type": e.__class__.__name__
         })
         capture_exception(e)
-        raise
+        fallback_msg = AIMessage(content="I'm sorry, I couldn't generate a response to your query. Please try again later.")
+        return {"messages": [fallback_msg]}
 
 
 
@@ -439,7 +448,8 @@ async def generate_with_persona(state: MessagesState):
             "error_type": e.__class__.__name__
         })
         capture_exception(e)
-        raise
+        fallback_msg = AIMessage(content="Raghu couldn't generate a response to your query. Please try again later.")
+        return {"messages": [fallback_msg]}
 
 
 graph_builder.add_node(relevance_check)
@@ -484,9 +494,9 @@ async def get_graph():
     Asynchronously builds and compiles the graph.
     Even though some nodes are async, the compile() method is synchronous.
     """
-    memory = MemorySaver()
+    # memory = MemorySaver()
     # Remove await here, as graph_builder.compile is synchronous.
-    compiled_graph = graph_builder.compile(checkpointer=memory)
+    compiled_graph = graph_builder.compile()
     return compiled_graph
 
 #Warm up the cache to load common responses on startup

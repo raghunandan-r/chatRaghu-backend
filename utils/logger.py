@@ -17,7 +17,7 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 
 def setup_logger():
     logger = logging.getLogger("chatraghu")
-    logger.setLevel(logging.WARNING)
+    logger.setLevel(logging.DEBUG)
     
     # Console handler
     console_handler = logging.StreamHandler()
