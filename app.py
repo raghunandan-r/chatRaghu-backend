@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Dict, Optional, Type, Tuple
+from typing import List, Dict, Optional, Type, Tuple, AsyncGenerator
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import time
@@ -98,7 +98,7 @@ class Storage:
                 del cls.request_history[thread_id]
 
 # Update these constants at the top of your file
-STREAM_TIMEOUT = 15  # 15 seconds timeout
+STREAM_TIMEOUT = 60  # Global 60-second timeout for the entire stream
 KEEP_ALIVE_TIMEOUT = 15
 
 @asynccontextmanager
@@ -219,7 +219,127 @@ async def logging_middleware(request: Request, call_next):
     
     return response
 
-# Routes
+@asynccontextmanager
+async def manage_stream_generator(stream_gen, thread_id: str):
+    """Context manager to properly handle stream generator lifecycle"""
+    try:
+        yield stream_gen
+    finally:
+        try:
+            if not hasattr(stream_gen, '_is_closing'):
+                setattr(stream_gen, '_is_closing', True)
+                await asyncio.wait_for(stream_gen.aclose(), timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while closing stream generator", extra={"thread_id": thread_id})
+        except RuntimeError as e:
+            if "already running" in str(e) or "didn't stop after athrow()" in str(e):
+                logger.warning(f"Generator cleanup race condition: {str(e)}", extra={"thread_id": thread_id})
+            else:
+                raise
+        except Exception as e:
+            logger.warning(f"Error during stream generator cleanup: {str(e)}", extra={"thread_id": thread_id})
+
+async def stream_chunks(
+    stream_gen,
+    thread_id: str,
+    start_time: float
+) -> AsyncGenerator[str, None]:
+    """Handle streaming of chunks with proper error handling and timeout"""
+    chunk_count = 0
+    total_chars = 0
+    last_beat = start_time
+
+    try:
+        async with manage_stream_generator(stream_gen, thread_id):
+            async with asyncio.timeout(STREAM_TIMEOUT):
+                while True:
+                    try:
+                        msg, metadata = await asyncio.wait_for(
+                            asyncio.shield(stream_gen.__anext__()),
+                            timeout=30
+                        )
+                        
+                        current_time = time.time()
+                        if current_time - start_time > STREAM_TIMEOUT:
+                            logger.warning("Stream exceeded maximum duration", extra={
+                                "thread_id": thread_id,
+                                "duration": current_time - start_time
+                            })
+                            yield json.dumps({
+                                "choices": [{
+                                    "delta": {"content": "Stream exceeded maximum duration"}
+                                }]
+                            }) + "\n"
+                            return
+                            
+                        chunk_count += 1
+                        total_chars += len(str(msg))
+                        
+                        if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
+                            yield json.dumps({
+                                "choices": [{
+                                    "delta": {"content": msg.content}
+                                }]
+                            }) + "\n"
+                            last_beat = current_time
+                            
+                    except StopAsyncIteration:
+                        logger.info("Stream completed normally", extra={"thread_id": thread_id})
+                        yield json.dumps({"choices": [{"delta": {"content": "[DONE]"}}]}) + "\n"
+                        return
+                    except asyncio.TimeoutError:
+                        logger.error("Stream timeout", extra={"thread_id": thread_id})
+                        yield json.dumps({
+                            "choices": [{
+                                "delta": {"content": "Request timed out"}
+                            }]
+                        }) + "\n"
+                        return
+                    except asyncio.CancelledError:
+                        logger.info("Stream cancelled by client", extra={
+                            "thread_id": thread_id,
+                            "duration": time.time() - start_time
+                        })
+                        return
+                        
+    except asyncio.TimeoutError:
+        logger.warning("Global stream timeout reached", extra={
+            "thread_id": thread_id,
+            "duration": time.time() - start_time,
+            "chunks_sent": chunk_count
+        })
+        yield json.dumps({
+            "choices": [{
+                "delta": {"content": "Stream exceeded maximum duration of 60 seconds"}
+            }]
+        }) + "\n"
+        return
+    except GeneratorExit:
+        logger.info("Generator exit requested", extra={
+            "thread_id": thread_id,
+            "duration": time.time() - start_time
+        })
+        return
+    except Exception as e:
+        error_context = {
+            "thread_id": thread_id,
+            "error_type": type(e).__name__,
+            "error_details": str(e),
+            "chunks_sent": chunk_count,
+            "total_duration": time.time() - start_time,
+        }
+        logger.error("Stream error", extra=error_context)
+        with sentry_sdk.push_scope() as scope:
+            for key, value in error_context.items():
+                scope.set_extra(key, value)
+            sentry_sdk.capture_exception(e)
+        yield json.dumps({
+            "choices": [{
+                "delta": {"content": "An unexpected error occurred"}
+            }]
+        }) + "\n"
+        return
+
 @app.post(
     "/api/chat",
     response_model=ChatResponse,
@@ -236,139 +356,35 @@ async def chat(
     request: ChatRequest,
     api_key: str = Depends(verify_api_key)
 ):
+    """Main chat endpoint handler"""
     thread_id = request.messages[0].thread_id if request.messages and request.messages[0].thread_id else ''
     
-    logger.info("Chat request received", extra={
-        "thread_id": thread_id,
-        "message_length": len(request.messages[0].content)
-    })
-    
-    await check_thread_rate_limit(thread_id)    
-    cache_key = f"{request.messages[0].content}"
-    is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
-
-    async def event_stream():
+    try:
+        # Rate limiting and cache check
+        await check_thread_rate_limit(thread_id)
+        cache_key = f"{request.messages[0].content}"
+        is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
+        
+        # Initialize stream
         messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
         config = {"configurable": {"thread_id": thread_id}}
         stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
-        try:
-            start_time = time.time()
-            last_beat = start_time
-            chunk_count = 0
-            total_chars = 0
-            
-            logger.debug("Starting graph stream", extra={
-                "thread_id": thread_id,
-                "is_cached": is_cached
-            })
-            
-            while True:
-                try:
-                    # Wrap each __anext__ call with a 30s timeout.
-                    msg, metadata = await asyncio.wait_for(
-                        asyncio.shield(stream_gen.__anext__()),
-                        timeout=30
-                    )
-                except asyncio.TimeoutError:
-                    logger.error("No stream chunk received in 30 seconds, terminating stream", extra={"thread_id": thread_id})
-                    # Return an error message as SSE so the frontend can inform the user.
-                    yield "data: " + json.dumps({
-                        "error": "Request timed out. Please try again later."
-                    }) + "\n\n"
-                    return  # End the stream gracefully.
-                
-                current_time = time.time()
-                chunk_count += 1
-                total_chars += len(str(msg))
-                logger.debug(
-                    "Streaming chunk", 
-                    extra={
-                        "thread_id": thread_id,
-                        "chunk_number": chunk_count,
-                        "chunk_size": len(str(msg)),
-                        "total_chars": total_chars,
-                        "time_since_start": current_time - start_time,
-                        "time_since_last": current_time - last_beat,
-                    }
-                )
-                if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
-                    logger.debug("Streaming chunk", extra={
-                        "thread_id": thread_id,
-                        "node": metadata.get('langgraph_node'),
-                        "chunk_length": len(msg.content)
-                    })
-                    content = msg.content
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': content}}]})}\n\n"
-                    last_beat = current_time
-
-            # NOTE: Won't be reached if the above while True breaks/returns,
-            # but can be useful when the generator terminates as expected.
-            yield "data: [DONE]\n\n"
-            
-        except asyncio.CancelledError as e:
-            elapsed_time = time.time() - start_time
-            error_context = {
-                "thread_id": thread_id,
-                "total_duration": elapsed_time,
-                "chunks_sent": chunk_count,
-                "total_chars_sent": total_chars,
-                "error_type": type(e).__name__,
-                "error_details": str(e),
-                "cancel_scope": str(e.args[0]) if e.args else "unknown",
-                "task_name": asyncio.current_task().get_name() if asyncio.current_task() else "unknown",
-                "pending_tasks": len(asyncio.all_tasks()),
-                "execution_point": "generate_with_retrieved_context" if "generate_with_retrieved_context" in str(e.__traceback__) else "unknown",
-                "traceback": e.__traceback__,
+        
+        return StreamingResponse(
+            stream_chunks(stream_gen, thread_id, time.time()),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Keep-Alive": f"timeout={KEEP_ALIVE_TIMEOUT}, max=100",
+                "X-Vercel-AI-Data-Stream": "v1",
+                "X-Cache-Status": "HIT" if is_cached else "MISS",
+                "Access-Control-Allow-Headers": "*"
             }
-            
-            logger.warning("Stream cancelled during chunk retrieval", extra=error_context)
-            with sentry_sdk.push_scope() as scope:
-                scope.set_tag("cancel_type", "pregel_cancellation")
-                for key, value in error_context.items():
-                    scope.set_extra(key, value)
-                sentry_sdk.capture_exception(e)
-            yield "data: " + json.dumps({
-                "error": f"Stream cancelled during {error_context.get('execution_point', 'unknown')}."
-            }) + "\n\n"
-            return
-            
-        except Exception as e:
-            error_context = {
-                "thread_id": thread_id,
-                "error_type": type(e).__name__,
-                "error_details": str(e),
-                "chunks_sent": chunk_count,
-                "total_duration": time.time() - start_time,
-                "traceback": e.__traceback__,
-            }
-            logger.error("Stream error", extra=error_context)
-            with sentry_sdk.push_scope() as scope:
-                for key, value in error_context.items():
-                    scope.set_extra(key, value)
-                sentry_sdk.capture_exception(e)
-            yield "data: " + json.dumps({
-                "error": "An unexpected error occurred. Please try again later."
-            }) + "\n\n"
-            return      
-        finally:
-            try:
-                # Attempt to close the generator gracefully (with a short timeout)
-                await asyncio.wait_for(stream_gen.aclose(), timeout=5)
-            except Exception as e:
-                logger.warning("Error closing stream generator", extra={"thread_id": thread_id, "error": str(e)})
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Keep-Alive": f"timeout={KEEP_ALIVE_TIMEOUT}, max=100",
-            "X-Vercel-AI-Data-Stream": "v1",
-            "X-Cache-Status": "HIT" if is_cached else "MISS",
-            "Access-Control-Allow-Headers": "*"
-        }
-    )
+        )
+    except Exception as e:
+        logger.exception("Error initializing chat stream")
+        raise HTTPException(status_code=500, detail="Failed to initialize chat stream")
 
 @app.get("/health")
 async def health_check():
