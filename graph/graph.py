@@ -39,6 +39,13 @@ if os.path.exists('.env'):
     load_dotenv('.env')
     load_dotenv('.env.development')
 
+
+# 2. Disable LangSmith tracing temporarily
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGCHAIN_ENDPOINT"] = ""
+os.environ["LANGCHAIN_API_KEY"] = ""
+
+
 # Load prompt templates from the JSON file
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_PATH = os.path.join(CURRENT_DIR, "prompt_templates.json")
@@ -48,16 +55,11 @@ with open(TEMPLATES_PATH, "r") as f:
 
 
 
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
+# os.environ["LANGCHAIN_TRACING_V2"] = "true"
 pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
-if not os.environ.get("LANGCHAIN_API_KEY"):
-    os.environ["LANGCHAIN_API_KEY"] = getpass.getpass()
-os.environ["USER_AGENT"] = "my-langchain-app/v0.1.1"
-
-# 2. Disable LangSmith tracing temporarily
-os.environ["LANGCHAIN_TRACING_V2"] = "false"
-os.environ["LANGCHAIN_ENDPOINT"] = ""
-os.environ["LANGCHAIN_API_KEY"] = ""
+# if not os.environ.get("LANGCHAIN_API_KEY"):
+#     os.environ["LANGCHAIN_API_KEY"] = getpass.getpass()
+# os.environ["USER_AGENT"] = "my-langchain-app/v0.1.1"
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=10,  
@@ -319,7 +321,7 @@ GLOBAL_FEW_SHOT_PROMPT = FewShotPromptTemplate(
 )
 
 
-@traceable(run_type="chain")
+# @traceable(run_type="chain")
 async def few_shot_selector(state: MessagesState):
     """
     Identifies few shot prompt examples to the current query as HACK, FUN, or STANDARD based on similarity to examples.
@@ -354,7 +356,7 @@ async def few_shot_selector(state: MessagesState):
 
 
 # Step 3: Generate a response using the retrieved content.
-@traceable(run_type="chain")
+# @traceable(run_type="chain")
 async def generate_with_retrieved_context(state: MessagesState):
     """Generate answer with retrieved context."""
     try:
@@ -406,7 +408,7 @@ async def generate_with_retrieved_context(state: MessagesState):
 
 
 
-@traceable(run_type="chain", tags=["persona_response"])
+# @traceable(run_type="chain", tags=["persona_response"])
 async def generate_with_persona(state: MessagesState):
     """Generate response in persona."""
     try:
