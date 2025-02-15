@@ -226,119 +226,92 @@ async def manage_stream_generator(stream_gen, thread_id: str):
         yield stream_gen
     finally:
         try:
-            if not hasattr(stream_gen, '_is_closing'):
-                setattr(stream_gen, '_is_closing', True)
-                await asyncio.wait_for(stream_gen.aclose(), timeout=5)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout while closing stream generator", extra={"thread_id": thread_id})
-        except RuntimeError as e:
-            if "already running" in str(e) or "didn't stop after athrow()" in str(e):
-                logger.warning(f"Generator cleanup race condition: {str(e)}", extra={"thread_id": thread_id})
-            else:
-                raise
+            # Don't rely on _is_closing attribute
+            if hasattr(stream_gen, 'aclose'):
+                try:
+                    await asyncio.wait_for(stream_gen.aclose(), timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout during generator cleanup", extra={"thread_id": thread_id})
+                except Exception as e:
+                    logger.warning(f"Error during generator cleanup: {str(e)}", extra={"thread_id": thread_id})
         except Exception as e:
-            logger.warning(f"Error during stream generator cleanup: {str(e)}", extra={"thread_id": thread_id})
+            logger.warning(f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id})
 
-async def stream_chunks(
-    stream_gen,
-    thread_id: str,
-    start_time: float
-) -> AsyncGenerator[str, None]:
-    """Handle streaming of chunks with proper error handling and timeout"""
+async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: Request):
     chunk_count = 0
-    total_chars = 0
-    last_beat = start_time
-
+    last_chunk_time = start_time
+    
     try:
+        logger.info("[STREAM_DEBUG] Stream starting", extra={
+            "thread_id": thread_id,
+            "start_time": start_time,
+            "client_ip": request.client.host if request.client else "unknown",
+            "user_agent": request.headers.get("user-agent", "unknown")
+        })
+        
         async with manage_stream_generator(stream_gen, thread_id):
-            async with asyncio.timeout(STREAM_TIMEOUT):
-                while True:
+            async for msg, metadata in stream_gen:
+                current_time = time.time()
+                chunk_count += 1
+                chunk_delay = current_time - last_chunk_time
+                
+                logger.info("[STREAM_DEBUG] Processing chunk", extra={
+                    "thread_id": thread_id,
+                    "chunk_number": chunk_count,
+                    "elapsed_time": current_time - start_time,
+                    "chunk_delay": chunk_delay,
+                    "langgraph_node": metadata.get('langgraph_node', 'unknown'),
+                    "msg_type": type(msg).__name__,
+                    "msg_content_length": len(msg.content) if hasattr(msg, 'content') else 0
+                })
+                
+                if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
                     try:
-                        msg, metadata = await asyncio.wait_for(
-                            asyncio.shield(stream_gen.__anext__()),
-                            timeout=30
-                        )
-                        
-                        current_time = time.time()
-                        if current_time - start_time > STREAM_TIMEOUT:
-                            logger.warning("Stream exceeded maximum duration", extra={
-                                "thread_id": thread_id,
-                                "duration": current_time - start_time
-                            })
-                            yield json.dumps({
-                                "choices": [{
-                                    "delta": {"content": "Stream exceeded maximum duration"}
-                                }]
-                            }) + "\n"
-                            return
-                            
-                        chunk_count += 1
-                        total_chars += len(str(msg))
-                        
-                        if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
-                            yield json.dumps({
-                                "choices": [{
-                                    "delta": {"content": msg.content}
-                                }]
-                            }) + "\n"
-                            last_beat = current_time
-                            
-                    except StopAsyncIteration:
-                        logger.info("Stream completed normally", extra={"thread_id": thread_id})
-                        yield json.dumps({"choices": [{"delta": {"content": "[DONE]"}}]}) + "\n"
-                        return
-                    except asyncio.TimeoutError:
-                        logger.error("Stream timeout", extra={"thread_id": thread_id})
                         yield json.dumps({
                             "choices": [{
-                                "delta": {"content": "Request timed out"}
+                                "delta": {"content": msg.content}
                             }]
                         }) + "\n"
-                        return
-                    except asyncio.CancelledError:
-                        logger.info("Stream cancelled by client", extra={
-                            "thread_id": thread_id,
-                            "duration": time.time() - start_time
-                        })
-                        return
+                        last_chunk_time = current_time
                         
-    except asyncio.TimeoutError:
-        logger.warning("Global stream timeout reached", extra={
+                    except Exception as e:
+                        logger.error("[STREAM_DEBUG] Chunk yield error", extra={
+                            "thread_id": thread_id,
+                            "chunk_number": chunk_count,
+                            "elapsed_time": current_time - start_time,
+                            "error": str(e),
+                            "error_type": type(e).__name__
+                        })
+                        raise
+                        
+    except GeneratorExit as e:
+        logger.error("[STREAM_DEBUG] Generator exit", extra={
             "thread_id": thread_id,
-            "duration": time.time() - start_time,
-            "chunks_sent": chunk_count
-        })
-        yield json.dumps({
-            "choices": [{
-                "delta": {"content": "Stream exceeded maximum duration of 60 seconds"}
-            }]
-        }) + "\n"
-        return
-    except GeneratorExit:
-        logger.info("Generator exit requested", extra={
-            "thread_id": thread_id,
-            "duration": time.time() - start_time
+            "elapsed_time": time.time() - start_time,
+            "chunks_processed": chunk_count,
+            "last_chunk_age": time.time() - last_chunk_time,
+            "traceback": {
+                "file": e.__traceback__.tb_frame.f_code.co_filename,
+                "function": e.__traceback__.tb_frame.f_code.co_name,
+                "line": e.__traceback__.tb_lineno
+            }
         })
         return
     except Exception as e:
-        error_context = {
+        logger.error("[STREAM_DEBUG] Stream error", extra={
             "thread_id": thread_id,
+            "elapsed_time": time.time() - start_time,
+            "chunks_processed": chunk_count,
+            "last_chunk_age": time.time() - last_chunk_time,
+            "error": str(e),
             "error_type": type(e).__name__,
-            "error_details": str(e),
-            "chunks_sent": chunk_count,
-            "total_duration": time.time() - start_time,
-        }
-        logger.error("Stream error", extra=error_context)
-        with sentry_sdk.push_scope() as scope:
-            for key, value in error_context.items():
-                scope.set_extra(key, value)
-            sentry_sdk.capture_exception(e)
-        yield json.dumps({
-            "choices": [{
-                "delta": {"content": "An unexpected error occurred"}
-            }]
-        }) + "\n"
-        return
+            "traceback": {
+                "file": e.__traceback__.tb_frame.f_code.co_filename,
+                "function": e.__traceback__.tb_frame.f_code.co_name,
+                "line": e.__traceback__.tb_lineno
+            }
+        })
+        raise
 
 @app.post(
     "/api/chat",
@@ -353,25 +326,26 @@ async def stream_chunks(
 )
 
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     api_key: str = Depends(verify_api_key)
 ):
     """Main chat endpoint handler"""
-    thread_id = request.messages[0].thread_id if request.messages and request.messages[0].thread_id else ''
+    thread_id = chat_request.messages[0].thread_id if chat_request.messages else ''
     
     try:
         # Rate limiting and cache check
         await check_thread_rate_limit(thread_id)
-        cache_key = f"{request.messages[0].content}"
+        cache_key = f"{chat_request.messages[0].content}"
         is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
         
         # Initialize stream
-        messages = {"messages": [graph.HumanMessage(content=request.messages[0].content)]}
+        messages = {"messages": [graph.HumanMessage(content=chat_request.messages[0].content)]}
         config = {"configurable": {"thread_id": thread_id}}
         stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
         
         return StreamingResponse(
-            stream_chunks(stream_gen, thread_id, time.time()),
+            stream_chunks(stream_gen, thread_id, time.time(), request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -383,8 +357,12 @@ async def chat(
             }
         )
     except Exception as e:
-        logger.exception("Error initializing chat stream")
-        raise HTTPException(status_code=500, detail="Failed to initialize chat stream")
+        logger.error("[STREAM_DEBUG] Chat endpoint error", extra={
+            "thread_id": thread_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        raise
 
 @app.get("/health")
 async def health_check():
