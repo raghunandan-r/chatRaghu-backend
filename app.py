@@ -98,6 +98,47 @@ class Storage:
             if not cls.request_history[thread_id]:
                 del cls.request_history[thread_id]
 
+class ASGILoggingMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":  # Skip WebSocket etc.
+            return await self.app(scope, receive, send)
+
+        thread_id = None  # We'll set this when we get the request
+
+        async def logged_receive():
+            msg = await receive()
+            logger.info("[ASGI_DEBUG] Received message", extra={
+                "thread_id": thread_id,
+                "message_type": msg["type"],
+                "asgi_msg": msg
+            })
+            return msg
+
+        async def logged_send(message: Message):
+            logger.info("[ASGI_DEBUG] Sending message", extra={
+                "thread_id": thread_id,
+                "message_type": message["type"],
+                "more_body": message.get("more_body", False)
+            })
+            await send(message)
+
+        try:
+            logger.info("[ASGI_DEBUG] Starting request", extra={
+                "scope_type": scope["type"],
+                "path": scope.get("path", "unknown")
+            })
+            await self.app(scope, logged_receive, logged_send)
+        except Exception as e:
+            logger.error("[ASGI_DEBUG] ASGI error", extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            raise
+
+
 # Update these constants at the top of your file
 STREAM_TIMEOUT = 60  # Global 60-second timeout for the entire stream
 KEEP_ALIVE_TIMEOUT = 15
@@ -126,10 +167,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Security and rate limiting constants
-MAX_API_REQUESTS_PER_MINUTE = 100
-MAX_USER_REQUESTS_PER_MINUTE = 30
-VALID_API_KEY = set(os.environ.get("VALID_API_KEYS", '').split(','))
+# Add ASGI logging middleware FIRST
+app.add_middleware(ASGILoggingMiddleware)
 
 # CORS configuration
 ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '').split(',')
@@ -142,6 +181,11 @@ app.add_middleware(
     expose_headers=["X-Rate-Limit", "Content-Type", "X-Vercel-AI-Data-Stream"],
     max_age=600,
 )
+
+# Security and rate limiting constants
+MAX_API_REQUESTS_PER_MINUTE = 100
+MAX_USER_REQUESTS_PER_MINUTE = 30
+VALID_API_KEY = set(os.environ.get("VALID_API_KEYS", '').split(','))
 
 # Dependencies
 async def verify_api_key(
@@ -369,48 +413,6 @@ async def chat(
 async def health_check():
     return {"status": "healthy"}
 
-class ASGILoggingMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":  # Skip WebSocket etc.
-            return await self.app(scope, receive, send)
-
-        thread_id = None  # We'll set this when we get the request
-
-        async def logged_receive():
-            msg = await receive()
-            logger.info("[ASGI_DEBUG] Received message", extra={
-                "thread_id": thread_id,
-                "message_type": msg["type"],
-                "asgi_msg": msg
-            })
-            return msg
-
-        async def logged_send(message: Message):
-            logger.info("[ASGI_DEBUG] Sending message", extra={
-                "thread_id": thread_id,
-                "message_type": message["type"],
-                "more_body": message.get("more_body", False)
-            })
-            await send(message)
-
-        try:
-            logger.info("[ASGI_DEBUG] Starting request", extra={
-                "scope_type": scope["type"],
-                "path": scope.get("path", "unknown")
-            })
-            await self.app(scope, logged_receive, logged_send)
-        except Exception as e:
-            logger.error("[ASGI_DEBUG] ASGI error", extra={
-                "error": str(e),
-                "error_type": type(e).__name__
-            })
-            raise
-
-# Add the middleware to FastAPI
-app.add_middleware(ASGILoggingMiddleware)
 
 application = app
 
