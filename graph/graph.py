@@ -54,6 +54,10 @@ if not os.environ.get("LANGCHAIN_API_KEY"):
     os.environ["LANGCHAIN_API_KEY"] = getpass.getpass()
 os.environ["USER_AGENT"] = "my-langchain-app/v0.1.1"
 
+# 2. Disable LangSmith tracing temporarily
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGCHAIN_ENDPOINT"] = ""
+os.environ["LANGCHAIN_API_KEY"] = ""
 
 rate_limiter = InMemoryRateLimiter(
     requests_per_second=10,  

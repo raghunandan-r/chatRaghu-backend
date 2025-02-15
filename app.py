@@ -46,7 +46,6 @@ if os.getenv("ENVIRONMENT") == "prod":
         },
     )
 
-
 class ClientMessage(BaseModel):
     role: str
     content: str
@@ -98,47 +97,6 @@ class Storage:
             if not cls.request_history[thread_id]:
                 del cls.request_history[thread_id]
 
-class ASGILoggingMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":  # Skip WebSocket etc.
-            return await self.app(scope, receive, send)
-
-        thread_id = None  # We'll set this when we get the request
-
-        async def logged_receive():
-            msg = await receive()
-            logger.info("[ASGI_DEBUG] Received message", extra={
-                "thread_id": thread_id,
-                "message_type": msg["type"],
-                "asgi_msg": msg
-            })
-            return msg
-
-        async def logged_send(message: Message):
-            logger.info("[ASGI_DEBUG] Sending message", extra={
-                "thread_id": thread_id,
-                "message_type": message["type"],
-                "more_body": message.get("more_body", False)
-            })
-            await send(message)
-
-        try:
-            logger.info("[ASGI_DEBUG] Starting request", extra={
-                "scope_type": scope["type"],
-                "path": scope.get("path", "unknown")
-            })
-            await self.app(scope, logged_receive, logged_send)
-        except Exception as e:
-            logger.error("[ASGI_DEBUG] ASGI error", extra={
-                "error": str(e),
-                "error_type": type(e).__name__
-            })
-            raise
-
-
 # Update these constants at the top of your file
 STREAM_TIMEOUT = 60  # Global 60-second timeout for the entire stream
 KEEP_ALIVE_TIMEOUT = 15
@@ -166,9 +124,6 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan
 )
-
-# Add ASGI logging middleware FIRST
-app.add_middleware(ASGILoggingMiddleware)
 
 # CORS configuration
 ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '').split(',')
@@ -311,37 +266,13 @@ async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: 
                 })
                 
                 if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
-                    try:
-                        yield json.dumps({
-                            "choices": [{
-                                "delta": {"content": msg.content}
-                            }]
-                        }) + "\n"
-                        last_chunk_time = current_time
-                        
-                    except Exception as e:
-                        logger.error("[STREAM_DEBUG] Chunk yield error", extra={
-                            "thread_id": thread_id,
-                            "chunk_number": chunk_count,
-                            "elapsed_time": current_time - start_time,
-                            "error": str(e),
-                            "error_type": type(e).__name__
-                        })
-                        raise
-                        
-    except GeneratorExit as e:
-        logger.error("[STREAM_DEBUG] Generator exit", extra={
-            "thread_id": thread_id,
-            "elapsed_time": time.time() - start_time,
-            "chunks_processed": chunk_count,
-            "last_chunk_age": time.time() - last_chunk_time,
-            "traceback": {
-                "file": e.__traceback__.tb_frame.f_code.co_filename,
-                "function": e.__traceback__.tb_frame.f_code.co_name,
-                "line": e.__traceback__.tb_lineno
-            }
-        })
-        return
+                    yield json.dumps({
+                        "choices": [{
+                            "delta": {"content": msg.content}
+                        }]
+                    }) + "\n"
+                    last_chunk_time = current_time
+
     except Exception as e:
         logger.error("[STREAM_DEBUG] Stream error", extra={
             "thread_id": thread_id,
@@ -349,12 +280,7 @@ async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: 
             "chunks_processed": chunk_count,
             "last_chunk_age": time.time() - last_chunk_time,
             "error": str(e),
-            "error_type": type(e).__name__,
-            "traceback": {
-                "file": e.__traceback__.tb_frame.f_code.co_filename,
-                "function": e.__traceback__.tb_frame.f_code.co_name,
-                "line": e.__traceback__.tb_lineno
-            }
+            "error_type": type(e).__name__            
         })
         raise
 
@@ -386,7 +312,9 @@ async def chat(
         
         # Initialize stream
         messages = {"messages": [graph.HumanMessage(content=chat_request.messages[0].content)]}
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {"configurable": {"thread_id": thread_id}, 
+                  "step_timeout": 60
+                  }
         stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
         
         return StreamingResponse(
