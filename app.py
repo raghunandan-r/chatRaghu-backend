@@ -23,6 +23,7 @@ import sentry_sdk
 from sentry_sdk import capture_exception, capture_message
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from starlette.types import Message
 
 # Load .env files only if they exist
 if os.path.exists('.env'):
@@ -368,17 +369,59 @@ async def chat(
 async def health_check():
     return {"status": "healthy"}
 
+class ASGILoggingMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":  # Skip WebSocket etc.
+            return await self.app(scope, receive, send)
+
+        thread_id = None  # We'll set this when we get the request
+
+        async def logged_receive():
+            msg = await receive()
+            logger.info("[ASGI_DEBUG] Received message", extra={
+                "thread_id": thread_id,
+                "message_type": msg["type"],
+                "asgi_msg": msg
+            })
+            return msg
+
+        async def logged_send(message: Message):
+            logger.info("[ASGI_DEBUG] Sending message", extra={
+                "thread_id": thread_id,
+                "message_type": message["type"],
+                "more_body": message.get("more_body", False)
+            })
+            await send(message)
+
+        try:
+            logger.info("[ASGI_DEBUG] Starting request", extra={
+                "scope_type": scope["type"],
+                "path": scope.get("path", "unknown")
+            })
+            await self.app(scope, logged_receive, logged_send)
+        except Exception as e:
+            logger.error("[ASGI_DEBUG] ASGI error", extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            raise
+
+# Add the middleware to FastAPI
+app.add_middleware(ASGILoggingMiddleware)
+
 application = app
 
 if __name__ == "__main__":    
-
     uvicorn.run(
-        "main:app",
+        "app:app",
         host="127.0.0.1",
         port=8080,
-        reload=True,
-        log_level="info",
-        timeout_keep_alive=20,
-        timeout_graceful_shutdown=30
+        timeout_keep_alive=120,
+        timeout_graceful_shutdown=30,
+        log_level="debug",
+        access_log=True
     )
         
