@@ -237,32 +237,62 @@ async def manage_stream_generator(stream_gen, thread_id: str):
         except Exception as e:
             logger.warning(f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id})
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def track_pregel_state(stream_gen, thread_id: str):
+    try:
+        # Access internal Pregel state if available
+        pregel_attrs = {
+            attr: getattr(stream_gen, attr, None) 
+            for attr in dir(stream_gen) 
+            if not attr.startswith('_')
+        }
+        
+        logger.info("[PREGEL_DEBUG] Starting Pregel loop", extra={
+            "thread_id": thread_id,
+            "available_attrs": str(pregel_attrs)
+        })
+        
+        yield
+        
+    except Exception as e:
+        logger.error("[PREGEL_DEBUG] Pregel error", extra={
+            "thread_id": thread_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        raise
+    finally:
+        logger.info("[PREGEL_DEBUG] Pregel loop ending", extra={
+            "thread_id": thread_id,
+            "final_state": str(pregel_attrs)
+        })
+
 async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: Request):
     chunk_count = 0
     last_chunk_time = start_time
     
-    try:
-        logger.info("[STREAM_DEBUG] Stream starting", extra={
-            "thread_id": thread_id,
-            "start_time": start_time,
-            "client_ip": request.client.host if request.client else "unknown",
-            "user_agent": request.headers.get("user-agent", "unknown")
-        })
-        
-        async with manage_stream_generator(stream_gen, thread_id):
+    async with track_pregel_state(stream_gen, thread_id):
+        try:
+            logger.info("[GRAPH_DEBUG] Stream starting", extra={
+                "thread_id": thread_id,
+                "start_time": start_time
+            })
+            
             async for msg, metadata in stream_gen:
                 current_time = time.time()
                 chunk_count += 1
-                chunk_delay = current_time - last_chunk_time
                 
-                logger.info("[STREAM_DEBUG] Processing chunk", extra={
+                # Log every chunk with detailed metadata
+                logger.info("[GRAPH_DEBUG] Processing chunk", extra={
                     "thread_id": thread_id,
                     "chunk_number": chunk_count,
                     "elapsed_time": current_time - start_time,
-                    "chunk_delay": chunk_delay,
-                    "langgraph_node": metadata.get('langgraph_node', 'unknown'),
+                    "chunk_delay": current_time - last_chunk_time,
+                    "metadata": str(metadata),  # Convert to string for logging
                     "msg_type": type(msg).__name__,
-                    "msg_content_length": len(msg.content) if hasattr(msg, 'content') else 0
+                    "msg_attrs": str(dir(msg))  # Inspect message attributes
                 })
                 
                 if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
@@ -272,18 +302,19 @@ async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: 
                         }]
                     }) + "\n"
                     last_chunk_time = current_time
-
-    except Exception as e:
-        logger.error("[STREAM_DEBUG] Stream error", extra={
-            "thread_id": thread_id,
-            "elapsed_time": time.time() - start_time,
-            "chunks_processed": chunk_count,
-            "last_chunk_age": time.time() - last_chunk_time,
-            "error": str(e),
-            "error_type": type(e).__name__            
-        })
-        raise
-
+                    
+        except Exception as e:
+            logger.error("[GRAPH_DEBUG] Stream error", extra={
+                "thread_id": thread_id,
+                "elapsed_time": time.time() - start_time,
+                "chunks_processed": chunk_count,
+                "last_chunk_age": time.time() - last_chunk_time,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "error_location": e.__traceback__.tb_frame.f_code.co_name,
+                "error_line": e.__traceback__.tb_lineno
+            })
+            raise
 @app.post(
     "/api/chat",
     response_model=ChatResponse,
@@ -312,10 +343,26 @@ async def chat(
         
         # Initialize stream
         messages = {"messages": [graph.HumanMessage(content=chat_request.messages[0].content)]}
-        config = {"configurable": {"thread_id": thread_id}, 
-                  "step_timeout": 60
-                  }
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "step_timeout": 60,
+            "debug": True
+        }
+        
+        logger.info("[GRAPH_DEBUG] Pre-stream setup", extra={
+            "thread_id": thread_id,
+            "config": str(config),  # Convert to string to avoid serialization issues
+            "message_length": len(chat_request.messages[0].content)
+        })
+        
         stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
+        
+        # Inspect stream_gen attributes
+        logger.info("[GRAPH_DEBUG] Stream generator created", extra={
+            "thread_id": thread_id,
+            "generator_type": type(stream_gen).__name__,
+            "generator_dir": str(dir(stream_gen))  # List available attributes
+        })
         
         return StreamingResponse(
             stream_chunks(stream_gen, thread_id, time.time(), request),
@@ -329,11 +376,13 @@ async def chat(
                 "Access-Control-Allow-Headers": "*"
             }
         )
+        
     except Exception as e:
-        logger.error("[STREAM_DEBUG] Chat endpoint error", extra={
+        logger.error("[GRAPH_DEBUG] Setup error", extra={
             "thread_id": thread_id,
             "error": str(e),
-            "error_type": type(e).__name__
+            "error_type": type(e).__name__,
+            "error_traceback": str(e.__traceback__.tb_frame.f_code.co_name)
         })
         raise
 
