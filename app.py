@@ -24,6 +24,8 @@ from sentry_sdk import capture_exception, capture_message
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from starlette.types import Message
+import anyio
+import traceback
 
 # Load .env files only if they exist
 if os.path.exists('.env'):
@@ -237,84 +239,75 @@ async def manage_stream_generator(stream_gen, thread_id: str):
         except Exception as e:
             logger.warning(f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id})
 
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def track_pregel_state(stream_gen, thread_id: str):
-    try:
-        # Access internal Pregel state if available
-        pregel_attrs = {
-            attr: getattr(stream_gen, attr, None) 
-            for attr in dir(stream_gen) 
-            if not attr.startswith('_')
-        }
-        
-        logger.info("[PREGEL_DEBUG] Starting Pregel loop", extra={
-            "thread_id": thread_id,
-            "available_attrs": str(pregel_attrs)
-        })
-        
-        yield
-        
-    except Exception as e:
-        logger.error("[PREGEL_DEBUG] Pregel error", extra={
-            "thread_id": thread_id,
-            "error": str(e),
-            "error_type": type(e).__name__
-        })
-        raise
-    finally:
-        logger.info("[PREGEL_DEBUG] Pregel loop ending", extra={
-            "thread_id": thread_id,
-            "final_state": str(pregel_attrs)
-        })
-
 async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: Request):
     chunk_count = 0
     last_chunk_time = start_time
     
-    async with track_pregel_state(stream_gen, thread_id):
+    try:
+        # Add task logging without modifying core logic
         try:
-            logger.info("[GRAPH_DEBUG] Stream starting", extra={
+            task = anyio.get_current_task()
+            logger.info("[SCOPE_DEBUG] Stream start", extra={
                 "thread_id": thread_id,
-                "start_time": start_time
+                "task_id": hex(id(task)),
+                "task_name": task.name if hasattr(task, 'name') else None,
+                "cancel_scope": getattr(task, 'cancel_scope', None)
             })
-            
-            async for msg, metadata in stream_gen:
-                current_time = time.time()
-                chunk_count += 1
-                
-                # Log every chunk with detailed metadata
-                logger.info("[GRAPH_DEBUG] Processing chunk", extra={
-                    "thread_id": thread_id,
-                    "chunk_number": chunk_count,
-                    "elapsed_time": current_time - start_time,
-                    "chunk_delay": current_time - last_chunk_time,
-                    "metadata": str(metadata),  # Convert to string for logging
-                    "msg_type": type(msg).__name__,
-                    "msg_attrs": str(dir(msg))  # Inspect message attributes
-                })
-                
-                if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
-                    yield json.dumps({
-                        "choices": [{
-                            "delta": {"content": msg.content}
-                        }]
-                    }) + "\n"
-                    last_chunk_time = current_time
-                    
         except Exception as e:
-            logger.error("[GRAPH_DEBUG] Stream error", extra={
-                "thread_id": thread_id,
-                "elapsed_time": time.time() - start_time,
-                "chunks_processed": chunk_count,
-                "last_chunk_age": time.time() - last_chunk_time,
+            logger.error("[SCOPE_DEBUG] Logging error", extra={
                 "error": str(e),
                 "error_type": type(e).__name__,
-                "error_location": e.__traceback__.tb_frame.f_code.co_name,
-                "error_line": e.__traceback__.tb_lineno
+                "traceback": traceback.format_exc()
             })
-            raise
+            
+        async for msg, metadata in stream_gen:
+            current_time = time.time()
+            chunk_count += 1
+            
+            # Log task every 50 chunks without interrupting main flow
+            if chunk_count % 50 == 0:
+                try:
+                    task = anyio.get_current_task()
+                    logger.info("[SCOPE_DEBUG] Stream progress", extra={
+                        "thread_id": thread_id,
+                        "task_id": hex(id(task)),
+                        "chunk_number": chunk_count,
+                        "elapsed_time": current_time - start_time,
+                        "cancel_scope": getattr(task, 'cancel_scope', None)
+                    })
+                except Exception as e:
+                    logger.error("[SCOPE_DEBUG] Logging error", extra={"error": str(e)})
+            
+            logger.info("[STREAM_DEBUG] Processing chunk", extra={
+                "thread_id": thread_id,
+                "chunk_number": chunk_count,
+                "elapsed_time": current_time - start_time,
+                "chunk_delay": current_time - last_chunk_time,
+                "metadata": str(metadata),
+                "msg_type": type(msg).__name__
+            })
+            
+            # Keep core streaming logic exactly as is
+            if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
+                yield json.dumps({
+                    "choices": [{
+                        "delta": {"content": msg.content}
+                    }]
+                }) + "\n"
+                last_chunk_time = current_time
+                
+    except Exception as e:
+        logger.error("[STREAM_DEBUG] Stream error", extra={
+            "thread_id": thread_id,
+            "elapsed_time": time.time() - start_time,
+            "chunks_processed": chunk_count,
+            "last_chunk_age": time.time() - last_chunk_time,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        })
+        raise
+
 @app.post(
     "/api/chat",
     response_model=ChatResponse,
@@ -390,6 +383,23 @@ async def chat(
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/test-scope")
+async def test_scope():
+    try:
+        task = anyio.get_current_task()
+        logger.info("[SCOPE_DEBUG] Test endpoint", extra={
+            "thread_id": "test",
+            "task_id": hex(id(task)),
+            "task_name": task.name if hasattr(task, 'name') else None,
+            "cancel_scope": getattr(task, 'cancel_scope', None)
+        })
+        return {"status": "task logged"}
+    except Exception as e:
+        logger.error("[SCOPE_DEBUG] Test failed", extra={
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        return {"status": "task logging failed", "error": str(e)}
 
 application = app
 
