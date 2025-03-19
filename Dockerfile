@@ -13,4 +13,4 @@ EXPOSE 3000
 ENV PYTHONUNBUFFERED=1
 
 # CMD ["uvicorn", "app:application", "--host", "0.0.0.0", "--port", "8080"] 
-CMD ["uvicorn", "app:application", "--host", "0.0.0.0", "--port", "3000"] 
+CMD uvicorn app:application --host 0.0.0.0 --port ${PORT:-3000} 
