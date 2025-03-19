@@ -298,10 +298,8 @@ async def chat(
         # Create state from thread history
         new_message = HumanMessage(content=chat_request.messages[0].content)
         initial_state = MessagesState.from_thread(thread_id, new_message)
-        
-        with logger.span("graph_exec", extra={"thread_id": thread_id}):
-            # Stream response
-            stream_gen = streaming_graph.execute_stream(initial_state)
+                
+        stream_gen = streaming_graph.execute_stream(initial_state)
         
         return StreamingResponse(
             stream_chunks(stream_gen, thread_id, time.time(), request),
