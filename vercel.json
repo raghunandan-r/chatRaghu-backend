@@ -11,15 +11,5 @@
         "src": "/(.*)",
         "dest": "/"
       }
-    ],
-    "env": {
-      "OPENAI_API_KEY": "@openai_api_key",
-      "PINECONE_API_KEY": "@pinecone_api_key",
-      "VALID_API_KEYS": "@valid_api_keys",
-      "TOGETHER_API_KEY": "@together_api_key",
-      "ALLOWED_ORIGINS": "@allowed_origins",
-      "LOGFIRE_ENVIRONMENT": "@logfire_environment",
-      "OPIK_API_KEY": "@opik_api_key",
-      "OPIK_WORKSPACE": "@opik_workspace"
-    }
+    ]    
   }
