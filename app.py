@@ -18,16 +18,29 @@ from starlette.types import Message
 import anyio
 import traceback
 from graph.graph import init_example_selector, MessagesState, HumanMessage, AIMessage, streaming_graph
-import logfire
-
-logfire.configure()
+from utils.logger import logger, log_request_info
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 # Load .env files only if they exist
 if os.path.exists('.env'):
     load_dotenv('.env')
     load_dotenv('.env.development')
 
-#if os.getenv("ENVIRONMENT") == "prod":
+if os.getenv("ENVIRONMENT") == "prod":
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN"),    
+        environment="production",  
+        traces_sample_rate=1.0,   
+        profiles_sample_rate=1.0, 
+        integrations=[
+            FastApiIntegration(),
+        ],
+        send_default_pii=True,
+        _experiments={
+            "continuous_profiling_auto_start": True,        
+        },
+    )
     
 
 class ClientMessage(BaseModel):
@@ -99,7 +112,7 @@ async def lifespan(app: FastAPI):
     try:
         await cleanup_task  # Await the task to ensure it finishes
     except asyncio.CancelledError:
-        logfire.warning("Cleanup task was cancelled")
+        logger.warning("Cleanup task was cancelled")
 
 # Initialize FastAPI
 app = FastAPI(
@@ -185,16 +198,18 @@ async def logging_middleware(request: Request, call_next):
     if request.url.path == "/favicon.ico":
         return await call_next(request)
     
-    logfire.info("Incoming request {request=}", request=request)    
+    logger.info("Incoming request", extra=request)    
     # Process request and measure timing
     start_time = datetime.now()
     response = await call_next(request)
     process_time = (datetime.now() - start_time).total_seconds()
     
-    # Log response
-    logfire.info("Request completed  {status_code=}, {process_time=}",                
-                status_code=response.status_code,
-                process_time=process_time)
+     # Log response
+    logger.info("Request completed", extra={
+        **request,
+        "status_code": response.status_code,
+        "process_time": process_time
+    })
     
     return response
 
@@ -210,15 +225,12 @@ async def manage_stream_generator(stream_gen, thread_id: str):
                 try:
                     await asyncio.wait_for(stream_gen.aclose(), timeout=5)
                 except asyncio.TimeoutError:
-                    logfire.warning("Timeout during generator cleanup {thread_id=}", thread_id=thread_id)
+                    logger.warning("Timeout during generator cleanup", extra={"thread_id": thread_id})
                 except Exception as e:
-                    logfire.warning("Error during generator cleanup {thread_id=}, {error=}", 
-                                   thread_id=thread_id, 
-                                   error=str(e))
+                    logger.warning(f"Error during generator cleanup: {str(e)}", extra={"thread_id": thread_id})
         except Exception as e:
-            logfire.warning("Final cleanup error {thread_id=}, {error=}", 
-                           thread_id=thread_id, 
-                           error=str(e))
+            logger.warning(f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id})
+
 
 async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: Request):
     chunk_count = 0
@@ -248,16 +260,15 @@ async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: 
                 last_chunk_time = current_time
                 
     except Exception as e:
-        logfire.error("[STREAM_DEBUG] Stream error {thread_id=}, {elapsed_time=}, {chunks_processed=}, {last_chunk_age=}, {error=}, {error_type=}",
-            thread_id=thread_id,
-            elapsed_time=time.time() - start_time,
-            chunks_processed=chunk_count,
-            last_chunk_age=time.time() - last_chunk_time,
-            error=str(e),
-            error_type=type(e).__name__
-        )
-        # Log traceback separately as it can be very long
-        logfire.error("[STREAM_DEBUG] Stream error traceback: {traceback}", traceback=traceback.format_exc())
+        logger.error("[STREAM_DEBUG] Stream error", extra={
+            "thread_id": thread_id,
+            "elapsed_time": time.time() - start_time,
+            "chunks_processed": chunk_count,
+            "last_chunk_age": time.time() - last_chunk_time,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        })
         raise
 
 @app.post(
@@ -288,7 +299,7 @@ async def chat(
         new_message = HumanMessage(content=chat_request.messages[0].content)
         initial_state = MessagesState.from_thread(thread_id, new_message)
         
-        with logfire.span("graph_exec {thread_id=}", thread_id=thread_id):
+        with logger.span("graph_exec", extra={"thread_id": thread_id}):
             # Stream response
             stream_gen = streaming_graph.execute_stream(initial_state)
         
@@ -302,14 +313,14 @@ async def chat(
                 "Access-Control-Allow-Headers": "*"
             }
         )
-        
+          
     except Exception as e:
-        logfire.error("[GRAPH_DEBUG] Setup error {thread_id=}, {error=}, {error_type=}, {error_traceback=}", 
-            thread_id=thread_id,
-            error=str(e),
-            error_type=type(e).__name__,
-            error_traceback=str(e.__traceback__.tb_frame.f_code.co_name)
-        )
+        logger.error("[GRAPH_DEBUG] Setup error", extra={
+            "thread_id": thread_id,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "error_traceback": str(e.__traceback__.tb_frame.f_code.co_name)
+        })
         raise
 
 @app.get("/health")
@@ -322,10 +333,10 @@ async def test_scope():
         task = anyio.get_current_task()
         return {"status": "task logged"}
     except Exception as e:
-        logfire.error("[SCOPE_DEBUG] Test failed {error=}, {error_type=}",
-            error=str(e),
-            error_type=type(e).__name__
-        )
+        logger.error("[SCOPE_DEBUG] Test failed", extra={
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
         return {"status": "task logging failed", "error": str(e)}
 
 application = app

@@ -55,5 +55,5 @@ structlog==23.1.0
 gunicorn==21.2.0
 
 # logging
-logfire==3.7.1
+sentry-sdk==2.23.1
 opik==1.5.8

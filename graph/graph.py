@@ -9,13 +9,13 @@ import re
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI, OpenAI
 import numpy as np
-import logfire
 from opik import track, opik_context
 from abc import ABC, abstractmethod
 from httpx import TimeoutException
 import asyncio
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 
-logfire.configure()
 if os.path.exists('.env'):
     load_dotenv('.env')
     load_dotenv('.env.development')
@@ -165,7 +165,7 @@ class VectorStore(BaseModel):
             return results
             
         except Exception as e:
-            logfire.error("Vector store query failed {error=}", error=str(e))
+            logger.error("Vector store query failed", extra={"error": str(e)})
             raise
 
 class StreamingNode(Node):
@@ -197,9 +197,7 @@ class StreamingStateGraph(StateGraph):
     @track(capture_output=False)
     async def execute_stream(self, initial_state: MessagesState) -> AsyncGenerator[Tuple[StreamingResponse, Dict], None]:
         try:
-            logfire.info("Starting graph execution {thread_id=}",
-                thread_id=initial_state.thread_id
-            )
+            logger.info("Starting graph execution", extra={"thread_id": initial_state.thread_id})
             opik_context.update_current_trace(
                 name="graph_execution",
                 thread_id=initial_state.thread_id
@@ -209,10 +207,7 @@ class StreamingStateGraph(StateGraph):
             state = initial_state
             
             while current_node:
-                logfire.info("Processing node {node=}, {thread_id=}",
-                    node=current_node,
-                    thread_id=state.thread_id
-                )
+                logger.info("Processing node", extra={"node": current_node, "thread_id": state.thread_id})
                 
                 node = self.nodes[current_node]
                 
@@ -254,18 +249,10 @@ class StreamingStateGraph(StateGraph):
                 condition = "default"
                 if current_node == "relevance_check":
                     condition = relevance_condition(state)
-                    logfire.info("Routing based on condition {node=}, {condition=}, {thread_id=}",
-                        node=current_node,
-                        condition=condition,
-                        thread_id=state.thread_id
-                    )
+                    logger.info("Routing based on condition", extra={"node": current_node, "condition": condition, "thread_id": state.thread_id})
                 elif current_node == "query_or_respond":
                     condition = query_or_respond_condition(state)
-                    logfire.info("Routing based on condition {node=}, {condition=}, {thread_id=}",
-                        node=current_node,
-                        condition=condition,
-                        thread_id=state.thread_id
-                    )
+                    logger.info("Routing based on condition", extra={"node": current_node, "condition": condition, "thread_id": state.thread_id})
                 
                 # Get the next node based on the condition
                 if condition in next_node:
@@ -277,15 +264,10 @@ class StreamingStateGraph(StateGraph):
                 if not current_node or current_node == "END":
                     break
 
-            logfire.info("Completed graph execution {thread_id=}",
-                thread_id=initial_state.thread_id
-            )
+            logger.info("Completed graph execution", extra={"thread_id": initial_state.thread_id})
                 
         except Exception as e:
-            logfire.error("Graph execution failed {thread_id=}, {error=}",
-                thread_id=initial_state.thread_id,
-                error=str(e)
-            )
+            logger.error("Graph execution failed", extra={"thread_id": initial_state.thread_id, "error": str(e)})
             raise
 
 # Retrieval Tool Implementation
@@ -302,10 +284,7 @@ class RetrieveTool(Tool):
     @track(capture_input=False)
     async def execute(self, query: str) -> tuple[str, List[RetrievalResult]]:
         try:
-            logfire.info("Starting retrieval {action=}, {query=}",
-                action="retrieval_start",
-                query=query
-            )
+            logger.info("Starting retrieval", extra={"action": "retrieval_start", "query": query})
 
             # Get embeddings using OpenAI directly
             query_embedding = await self._get_embedding(query)
@@ -343,7 +322,7 @@ class RetrieveTool(Tool):
             return "", []
             
         except Exception as e:
-            logfire.error("Retrieval failed {error=}", error=str(e))
+            logger.error("Retrieval failed", extra={"error": str(e)})
             raise
 
     async def _get_embedding(self, text: str) -> List[float]:
@@ -361,11 +340,7 @@ class RelevanceCheckNode(Node):
             current_query = next((msg for msg in reversed(state.messages) 
                                 if isinstance(msg, HumanMessage)), None)
             
-            logfire.info("Relevance check initiated {node=}, {thread_id=}, {current_messages=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                current_messages=current_query.content
-            )
+            logger.info("Relevance check initiated", extra={"node": self.name, "thread_id": state.thread_id, "current_messages": current_query.content})
                         
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -401,11 +376,7 @@ class RelevanceCheckNode(Node):
                 AIMessage(content=full_content)
             ], thread_id=state.thread_id)
         except Exception as e:
-            logfire.error("Relevance check failed {node=}, {thread_id=}, {error=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                error=str(e)
-            )
+            logger.error("Relevance check failed", extra={"node": self.name, "thread_id": state.thread_id, "error": str(e)})
             raise
 
 class QueryOrRespondNode(Node):
@@ -459,11 +430,7 @@ class QueryOrRespondNode(Node):
                 "content": f"focus on this latest query from the conversation: {last_human_message}"
             })
 
-            logfire.info("Query/Respond check with history {node=}, {thread_id=}, {message_count=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                message_count=len(openai_messages)
-            )
+            logger.info("Query/Respond check with history", extra={"node": self.name, "thread_id": state.thread_id, "message_count": len(openai_messages)})
                         
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -511,15 +478,10 @@ class QueryOrRespondNode(Node):
                 )
             elif response.choices[0].message.content is None:
                 # Handle the case where content is None but it's not identified as a function call
-                logfire.warning("Received response with None content but not a function call {thread_id=}",
-                    thread_id=state.thread_id
-                )
+                logger.warning("Received response with None content but not a function call", extra={"thread_id": state.thread_id})
                 # Fallback to using the latest query
                 query = last_human_message
-                logfire.info("Text-based retrieval indication detected {query=}, {thread_id=}",
-                    query=query,
-                    thread_id=state.thread_id  
-                )
+                logger.info("Text-based retrieval indication detected", extra={"query": query, "thread_id": state.thread_id})
                 
                 # Create and use RetrieveTool
                 retriever = RetrieveTool()
@@ -545,10 +507,7 @@ class QueryOrRespondNode(Node):
             else:
                 # It's a normal text response with content
                 response_content = response.choices[0].message.content.strip()
-                logfire.info("Raw response from query_or_respond {content=}, {thread_id=}",
-                    content=response_content,
-                    thread_id=state.thread_id
-                )
+                logger.info("Raw response from query_or_respond", extra={"content": response_content, "thread_id": state.thread_id})
 
                 # Check for function calls first
                 if (response.choices[0].finish_reason == "function_call" or 
@@ -580,10 +539,7 @@ class QueryOrRespondNode(Node):
                 elif "RETRIEVE" in response_content:
                     # Text indicates retrieval is needed
                     query = last_human_message
-                    logfire.info("Text-based retrieval indication detected {query=}, {thread_id=}",
-                        query=query,
-                        thread_id=state.thread_id  
-                    )
+                    logger.info("Text-based retrieval indication detected", extra={"query": query, "thread_id": state.thread_id})
                     
                     # Create and use RetrieveTool
                     retriever = RetrieveTool()
@@ -608,9 +564,7 @@ class QueryOrRespondNode(Node):
                     )
                 else:
                     # Anything else means sufficient context
-                    logfire.info("Sufficient context indicated {thread_id=}",
-                        thread_id=state.thread_id
-                    )
+                    logger.info("Sufficient context indicated", extra={"thread_id": state.thread_id})
                     content = response_content
                     
                     opik_context.update_current_span(
@@ -624,11 +578,7 @@ class QueryOrRespondNode(Node):
                         thread_id=state.thread_id
                     )
         except Exception as e:
-            logfire.error("Query/respond failed {node=}, {thread_id=}, {error=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                error=str(e)
-            )
+            logger.error("Query/respond failed", extra={"node": self.name, "thread_id": state.thread_id, "error": str(e)})
             raise
 
 # Global cache for embeddings
@@ -700,23 +650,17 @@ class FewShotSelectorNode(Node):
             if not current_query:
                 raise ValueError("No human message found")
 
-            logfire.info("Few-shot selection initiated {node=}, {thread_id=}, {current_msg=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                current_msg=current_query.content
-            )
+            logger.info("Few-shot selection initiated", extra={"node": self.name, "thread_id": state.thread_id, "current_msg": current_query.content})
             
             # Add more granular logging
-            logfire.info("Getting embeddings for query {thread_id=}",
-                thread_id=state.thread_id
-            )
+            logger.info("Getting embeddings for query", extra={"thread_id": state.thread_id})
             
             # Add timeout for embedding step
             try:
                 get_examples_task = self.example_selector.get_relevant_examples(current_query.content)
                 relevant_examples = await asyncio.wait_for(get_examples_task, timeout=15.0)
             except (asyncio.TimeoutError, TimeoutException) as e:
-                logfire.error("Embedding API timeout {thread_id=}", thread_id=state.thread_id)
+                logger.error("Embedding API timeout", extra={"thread_id": state.thread_id})
                 # Fallback to direct response
                 return MessagesState(messages=[
                     *state.messages,
@@ -740,9 +684,7 @@ class FewShotSelectorNode(Node):
                 PROMPT_TEMPLATES["few_shot"]["suffix"].format(query=current_query.content)
             )
             
-            logfire.info("Sending completion request to OpenAI {thread_id=}",
-                thread_id=state.thread_id
-            )
+            logger.info("Sending completion request to OpenAI", extra={"thread_id": state.thread_id})
             
             # Add timeout for OpenAI API call
             try:
@@ -756,7 +698,7 @@ class FewShotSelectorNode(Node):
                 )
                 response = await asyncio.wait_for(completion_task, timeout=20.0)
             except (asyncio.TimeoutError, TimeoutException) as e:
-                logfire.error("OpenAI API timeout {thread_id=}", thread_id=state.thread_id)
+                logger.error("OpenAI API timeout", extra={"thread_id": state.thread_id})
                 # Fallback to direct response
                 return MessagesState(messages=[
                     *state.messages,
@@ -776,11 +718,7 @@ class FewShotSelectorNode(Node):
             ], thread_id=state.thread_id)
             
         except Exception as e:
-            logfire.error("Few-shot selection failed {node=}, {thread_id=}, {error=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                error=str(e)
-            )
+            logger.error("Few-shot selection failed", extra={"node": self.name, "thread_id": state.thread_id, "error": str(e)})
             raise
 
 
@@ -797,11 +735,7 @@ class GenerateWithRetrievedContextNode(Node):
             if not user_query:
                 raise ValueError("No user query found")
             
-            logfire.info("Context generation initiated {node=}, {thread_id=}, {current_msg=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                current_msg=user_query.content
-            )
+            logger.info("Context generation initiated", extra={"node": self.name, "thread_id": state.thread_id, "current_msg": user_query.content})
             
             current_date = datetime.now().strftime("%B %d, %Y")
             
@@ -825,9 +759,7 @@ class GenerateWithRetrievedContextNode(Node):
                 docs_content=docs_content
             )
             
-            logfire.info("Generated system message content {thread_id=}",
-                thread_id=state.thread_id
-            )
+            logger.info("Generated system message content", extra={"thread_id": state.thread_id})
             
             messages = [
                 {"role": "system", "content": system_message_content},
@@ -840,12 +772,7 @@ class GenerateWithRetrievedContextNode(Node):
                 temperature=0.1
             )
             content = response.choices[0].message.content
-            logfire.info("Completed context generation {node=}, {thread_id=}, {response_length=}, {response=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                response_length=len(content),
-                response=content[:100] + ("..." if len(content) > 500 else "")  # Truncate long responses
-            )
+            logger.info("Completed context generation", extra={"node": self.name, "thread_id": state.thread_id, "response_length": len(content), "response": content[:100] + ("..." if len(content) > 500 else "")})
             opik_context.update_current_span(
                 name="generate_with_retrieved_context",
                 input={"docs": docs_content},
@@ -860,11 +787,7 @@ class GenerateWithRetrievedContextNode(Node):
             )
 
         except Exception as e:
-            logfire.error("Streaming context generation failed {action=}, {error=}, {thread_id=}",
-                action="streaming_context_error",
-                error=str(e),
-                thread_id=state.thread_id
-            )
+            logger.error("Streaming context generation failed", extra={"action": "streaming_context_error", "error": str(e), "thread_id": state.thread_id})
             
             raise
 
@@ -876,10 +799,7 @@ class GenerateWithPersonaNode(StreamingNode):
         state: MessagesState
     ) -> AsyncGenerator[StreamingResponse, None]:
         try:
-            logfire.info("Starting persona generation {node=}, {thread_id=}",
-                node=self.name,
-                thread_id=state.thread_id
-            )
+            logger.info("Starting persona generation", extra={"node": self.name, "thread_id": state.thread_id})
             
             query_count = sum(1 for message in state.messages if isinstance(message, HumanMessage)) > 5
             last_ai_message = next((msg.content for msg in reversed(state.messages) 
@@ -890,10 +810,7 @@ class GenerateWithPersonaNode(StreamingNode):
             if not user_query:
                 raise ValueError("No user query found")
                 
-            logfire.info("User query found {query=}, {thread_id=}",
-                query=user_query,
-                thread_id=state.thread_id
-            )
+            logger.info("User query found", extra={"query": user_query, "thread_id": state.thread_id})
 
             # Get the category from the few_shot_selector output
             category = "UNKNOWN"
@@ -924,11 +841,7 @@ class GenerateWithPersonaNode(StreamingNode):
             
             # Log the complete response
             full_response = "".join(complete_response)
-            logfire.info("Completed persona generation {node=}, {thread_id=}, {response=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                response=full_response[:500] + ("..." if len(full_response) > 500 else "")  # Truncate long responses
-            )
+            logger.info("Completed persona generation", extra={"node": self.name, "thread_id": state.thread_id, "response": full_response[:500] + ("..." if len(full_response) > 500 else "")})
             opik_context.update_current_span(
                 name="generate_with_persona",
                 input={"ai_message": last_ai_message},
@@ -937,11 +850,7 @@ class GenerateWithPersonaNode(StreamingNode):
             )
                 
         except Exception as e:
-            logfire.error("Persona generation failed {node=}, {thread_id=}, {error=}",
-                node=self.name,
-                thread_id=state.thread_id,
-                error=str(e)
-            )
+            logger.error("Persona generation failed", extra={"node": self.name, "thread_id": state.thread_id, "error": str(e)})
             raise
 
 # Initialize single vector store instance
@@ -1012,10 +921,7 @@ async def stream_chat_completion(
                             function_args=function_args
                         )
                     except json.JSONDecodeError as e:
-                        logfire.error("Failed to parse function arguments {error=}, {buffer=}",
-                            error=str(e),
-                            buffer=state.buffer
-                        )
+                        logger.error("Failed to parse function arguments", extra={"error": str(e), "buffer": state.buffer})
                         raise
             
             # Handle content streaming
@@ -1030,10 +936,7 @@ async def stream_chat_completion(
                 yield StreamingResponse(type="end")
 
     except Exception as e:
-        logfire.error("Streaming failed {action=}, {error=}",
-            action="streaming_error",
-            error=str(e)
-        )
+        logger.error("Streaming failed", extra={"action": "streaming_error", "error": str(e)})
         raise
 
 
