@@ -12,41 +12,23 @@ from typing import List, Dict, Optional, Type, Tuple, AsyncGenerator
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import time
-import graph.graph as graph
-# from graph.graph import warm_up_cache  # Import the warm_up function
-from utils.logger import logger, log_request_info
-from langsmith import Client
 # from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
 import uvicorn
-import sys
-import sentry_sdk
-from sentry_sdk import capture_exception, capture_message
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from starlette.types import Message
 import anyio
 import traceback
+from graph.graph import init_example_selector, MessagesState, HumanMessage, AIMessage, streaming_graph
+import logfire
+
+logfire.configure()
 
 # Load .env files only if they exist
 if os.path.exists('.env'):
     load_dotenv('.env')
     load_dotenv('.env.development')
 
-if os.getenv("ENVIRONMENT") == "prod":
-    sentry_sdk.init(
-        dsn=os.getenv("SENTRY_DSN"),    
-        environment="production",  
-        traces_sample_rate=1.0,   
-        profiles_sample_rate=1.0, 
-        integrations=[
-            FastApiIntegration(),
-            AsyncioIntegration(),
-        ],
-        send_default_pii=True,
-        _experiments={
-            "continuous_profiling_auto_start": True,        
-        },
-    )
+#if os.getenv("ENVIRONMENT") == "prod":
+    
 
 class ClientMessage(BaseModel):
     role: str
@@ -106,10 +88,10 @@ KEEP_ALIVE_TIMEOUT = 15
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    # Startup
     cleanup_task = asyncio.create_task(Storage.cleanup_old_entries())  # Schedule the cleanup task
     # print("Warming up LLM cache...")
     # await warm_up_cache()
+    await init_example_selector()
      
     yield
     # Shutdown (if needed)
@@ -117,13 +99,13 @@ async def lifespan(app: FastAPI):
     try:
         await cleanup_task  # Await the task to ensure it finishes
     except asyncio.CancelledError:
-        logger.warning("Cleanup task was cancelled")
+        logfire.warning("Cleanup task was cancelled")
 
 # Initialize FastAPI
 app = FastAPI(
     title="ChatRaghu API",
     description="API for querying documents and returning LLM-formatted outputs",
-    version="1.1.0",
+    version="2.1.0",
     lifespan=lifespan
 )
 
@@ -140,8 +122,8 @@ app.add_middleware(
 )
 
 # Security and rate limiting constants
-MAX_API_REQUESTS_PER_MINUTE = 100
-MAX_USER_REQUESTS_PER_MINUTE = 30
+MAX_API_REQUESTS_PER_MINUTE = 60
+MAX_USER_REQUESTS_PER_MINUTE = 10
 VALID_API_KEY = set(os.environ.get("VALID_API_KEYS", '').split(','))
 
 # Dependencies
@@ -202,22 +184,17 @@ async def add_security_headers(request: Request, call_next):
 async def logging_middleware(request: Request, call_next):
     if request.url.path == "/favicon.ico":
         return await call_next(request)
-
-    # Log request
-    request_info = await log_request_info(request)
-    logger.info("Incoming request", extra=request_info)
     
+    logfire.info("Incoming request {request=}", request=request)    
     # Process request and measure timing
     start_time = datetime.now()
     response = await call_next(request)
     process_time = (datetime.now() - start_time).total_seconds()
     
     # Log response
-    logger.info("Request completed", extra={
-        **request_info,
-        "status_code": response.status_code,
-        "process_time": process_time
-    })
+    logfire.info("Request completed  {status_code=}, {process_time=}",                
+                status_code=response.status_code,
+                process_time=process_time)
     
     return response
 
@@ -233,79 +210,54 @@ async def manage_stream_generator(stream_gen, thread_id: str):
                 try:
                     await asyncio.wait_for(stream_gen.aclose(), timeout=5)
                 except asyncio.TimeoutError:
-                    logger.warning("Timeout during generator cleanup", extra={"thread_id": thread_id})
+                    logfire.warning("Timeout during generator cleanup {thread_id=}", thread_id=thread_id)
                 except Exception as e:
-                    logger.warning(f"Error during generator cleanup: {str(e)}", extra={"thread_id": thread_id})
+                    logfire.warning("Error during generator cleanup {thread_id=}, {error=}", 
+                                   thread_id=thread_id, 
+                                   error=str(e))
         except Exception as e:
-            logger.warning(f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id})
+            logfire.warning("Final cleanup error {thread_id=}, {error=}", 
+                           thread_id=thread_id, 
+                           error=str(e))
 
 async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: Request):
     chunk_count = 0
     last_chunk_time = start_time
     
     try:
-        # Add task logging without modifying core logic
-        try:
-            task = anyio.get_current_task()
-            logger.info("[SCOPE_DEBUG] Stream start", extra={
-                "thread_id": thread_id,
-                "task_id": hex(id(task)),
-                "task_name": task.name if hasattr(task, 'name') else None,
-                "cancel_scope": getattr(task, 'cancel_scope', None)
-            })
-        except Exception as e:
-            logger.error("[SCOPE_DEBUG] Logging error", extra={
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc()
-            })
             
-        async for msg, metadata in stream_gen:
+        async for chunk, metadata in stream_gen:
             current_time = time.time()
             chunk_count += 1
-            
-            # Log task every 50 chunks without interrupting main flow
-            if chunk_count % 50 == 0:
-                try:
-                    task = anyio.get_current_task()
-                    logger.info("[SCOPE_DEBUG] Stream progress", extra={
-                        "thread_id": thread_id,
-                        "task_id": hex(id(task)),
-                        "chunk_number": chunk_count,
-                        "elapsed_time": current_time - start_time,
-                        "cancel_scope": getattr(task, 'cancel_scope', None)
-                    })
-                except Exception as e:
-                    logger.error("[SCOPE_DEBUG] Logging error", extra={"error": str(e)})
-            
-            logger.info("[STREAM_DEBUG] Processing chunk", extra={
-                "thread_id": thread_id,
-                "chunk_number": chunk_count,
-                "elapsed_time": current_time - start_time,
-                "chunk_delay": current_time - last_chunk_time,
-                "metadata": str(metadata),
-                "msg_type": type(msg).__name__
-            })
-            
-            # Keep core streaming logic exactly as is
-            if isinstance(msg, graph.AIMessageChunk) and metadata.get('langgraph_node') == 'generate_with_persona':
+           
+            # Handle StreamingResponse objects
+            if hasattr(chunk, 'type') and chunk.type == "content" and chunk.content:
                 yield json.dumps({
                     "choices": [{
-                        "delta": {"content": msg.content}
+                        "delta": {"content": chunk.content}
+                    }]
+                }) + "\n"
+                last_chunk_time = current_time
+            # Handle AIMessage objects (for backward compatibility)
+            elif isinstance(chunk, AIMessage) and metadata.get('node') == 'generate_with_persona':
+                yield json.dumps({
+                    "choices": [{
+                        "delta": {"content": chunk.content}
                     }]
                 }) + "\n"
                 last_chunk_time = current_time
                 
     except Exception as e:
-        logger.error("[STREAM_DEBUG] Stream error", extra={
-            "thread_id": thread_id,
-            "elapsed_time": time.time() - start_time,
-            "chunks_processed": chunk_count,
-            "last_chunk_age": time.time() - last_chunk_time,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "traceback": traceback.format_exc()
-        })
+        logfire.error("[STREAM_DEBUG] Stream error {thread_id=}, {elapsed_time=}, {chunks_processed=}, {last_chunk_age=}, {error=}, {error_type=}",
+            thread_id=thread_id,
+            elapsed_time=time.time() - start_time,
+            chunks_processed=chunk_count,
+            last_chunk_age=time.time() - last_chunk_time,
+            error=str(e),
+            error_type=type(e).__name__
+        )
+        # Log traceback separately as it can be very long
+        logfire.error("[STREAM_DEBUG] Stream error traceback: {traceback}", traceback=traceback.format_exc())
         raise
 
 @app.post(
@@ -320,6 +272,7 @@ async def stream_chunks(stream_gen, thread_id: str, start_time: float, request: 
     }
 )
 
+
 async def chat(
     request: Request,
     chat_request: ChatRequest,
@@ -329,33 +282,15 @@ async def chat(
     thread_id = chat_request.messages[0].thread_id if chat_request.messages else ''
     
     try:
-        # Rate limiting and cache check
+        
         await check_thread_rate_limit(thread_id)
-        cache_key = f"{chat_request.messages[0].content}"
-        is_cached = graph.llm.cache and await graph.llm.cache.lookup(cache_key) is not None
+        # Create state from thread history
+        new_message = HumanMessage(content=chat_request.messages[0].content)
+        initial_state = MessagesState.from_thread(thread_id, new_message)
         
-        # Initialize stream
-        messages = {"messages": [graph.HumanMessage(content=chat_request.messages[0].content)]}
-        config = {
-            "configurable": {"thread_id": thread_id},
-            "step_timeout": 60,
-            "debug": True
-        }
-        
-        logger.info("[GRAPH_DEBUG] Pre-stream setup", extra={
-            "thread_id": thread_id,
-            "config": str(config),  # Convert to string to avoid serialization issues
-            "message_length": len(chat_request.messages[0].content)
-        })
-        
-        stream_gen = graph.graph.astream(messages, stream_mode="messages", config=config)
-        
-        # Inspect stream_gen attributes
-        logger.info("[GRAPH_DEBUG] Stream generator created", extra={
-            "thread_id": thread_id,
-            "generator_type": type(stream_gen).__name__,
-            "generator_dir": str(dir(stream_gen))  # List available attributes
-        })
+        with logfire.span("graph_exec {thread_id=}", thread_id=thread_id):
+            # Stream response
+            stream_gen = streaming_graph.execute_stream(initial_state)
         
         return StreamingResponse(
             stream_chunks(stream_gen, thread_id, time.time(), request),
@@ -363,20 +298,18 @@ async def chat(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Keep-Alive": f"timeout={KEEP_ALIVE_TIMEOUT}, max=100",
                 "X-Vercel-AI-Data-Stream": "v1",
-                "X-Cache-Status": "HIT" if is_cached else "MISS",
                 "Access-Control-Allow-Headers": "*"
             }
         )
         
     except Exception as e:
-        logger.error("[GRAPH_DEBUG] Setup error", extra={
-            "thread_id": thread_id,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "error_traceback": str(e.__traceback__.tb_frame.f_code.co_name)
-        })
+        logfire.error("[GRAPH_DEBUG] Setup error {thread_id=}, {error=}, {error_type=}, {error_traceback=}", 
+            thread_id=thread_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            error_traceback=str(e.__traceback__.tb_frame.f_code.co_name)
+        )
         raise
 
 @app.get("/health")
@@ -387,18 +320,12 @@ async def health_check():
 async def test_scope():
     try:
         task = anyio.get_current_task()
-        logger.info("[SCOPE_DEBUG] Test endpoint", extra={
-            "thread_id": "test",
-            "task_id": hex(id(task)),
-            "task_name": task.name if hasattr(task, 'name') else None,
-            "cancel_scope": getattr(task, 'cancel_scope', None)
-        })
         return {"status": "task logged"}
     except Exception as e:
-        logger.error("[SCOPE_DEBUG] Test failed", extra={
-            "error": str(e),
-            "error_type": type(e).__name__
-        })
+        logfire.error("[SCOPE_DEBUG] Test failed {error=}, {error_type=}",
+            error=str(e),
+            error_type=type(e).__name__
+        )
         return {"status": "task logging failed", "error": str(e)}
 
 application = app
@@ -406,8 +333,8 @@ application = app
 if __name__ == "__main__":    
     uvicorn.run(
         "app:app",
-        host="127.0.0.1",
-        port=8080,
+        host="0.0.0.0",
+        port=3000,
         timeout_keep_alive=120,
         timeout_graceful_shutdown=30,
         log_level="debug",

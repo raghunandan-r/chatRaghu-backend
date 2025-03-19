@@ -1,10 +1,3 @@
-# Core LangChain packages (keep strict versions)
-langchain-openai==0.3.0
-langchain-together==0.3.0
-langchain-pinecone==0.2.2
-langchain-community==0.3.14
-langgraph==0.2.62
-langchain-core==0.3.29
 openai>=1.60.2
 pinecone-client==3.0.0
 
@@ -18,10 +11,6 @@ sqlalchemy>=1.4.0
 aiohttp>=3.7.4
 python-socketio>=5.0.0
 jiter>=0.4.0,<1
-
-# Vector stores (keep strict versions)
-
-faiss-cpu==1.7.4
 
 # Web framework core (keep strict versions)
 fastapi==0.109.0
@@ -65,8 +54,6 @@ python-json-logger==2.0.7
 structlog==23.1.0
 gunicorn==21.2.0
 
-# LangSmith dependency
-langsmith==0.2.11
-
 # logging
-sentry-sdk[fastapi]==2.20.0
+logfire==3.7.1
+opik==1.5.8
