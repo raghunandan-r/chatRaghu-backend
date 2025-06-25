@@ -34,6 +34,8 @@ starlette>=0.35.0
 # Core dependencies (can be flexible)
 python-dotenv>=1.0.0
 numpy>=1.24.3
+pandas>=2.2.0
+backoff>=2.2.1
 typing-extensions>=4.9.0
 annotated-types>=0.5.0
 anyio>=4.2.0
@@ -42,7 +44,7 @@ sniffio>=1.3.0
 exceptiongroup>=1.0.0
 
 # Testing and Development tools (keep strict versions)
-pytest==7.4.0
+pytest==8.2.2
 pytest-asyncio==0.20.0
 pytest-cov==2.12.1
 mypy==0.991

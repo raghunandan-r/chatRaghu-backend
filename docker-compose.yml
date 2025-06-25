@@ -1,10 +1,36 @@
 version: '3.3'
+
 services:
-  web:
+  # Main ChatRaghu backend service
+  chatraghu-backend:
     build: .
     ports:
       - "3000:3000"
     env_file:
       - .env
     environment:
-      - PINECONE_API_KEY
+      - EVALUATION_SERVICE_URL=http://evaluation-service:8001
+      - EVALUATION_SERVICE_TIMEOUT=30
+      - MOCK_EVAL_CLIENT=true
+    depends_on:
+      - evaluation-service
+    networks:
+      - chatraghu-network
+
+  # Evaluation service
+  evaluation-service:
+    build:
+      context: ./evals-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./evals-service/eval_results:/app/eval_results
+    networks:
+      - chatraghu-network
+
+networks:
+  chatraghu-network:
+    driver: bridge

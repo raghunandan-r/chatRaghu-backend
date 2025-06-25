@@ -1,5 +1,5 @@
 import logging
-import os
+import sys
 from datetime import datetime
 from typing import Any
 from pythonjsonlogger import jsonlogger
@@ -19,7 +19,7 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
             {
                 "timestamp": datetime.utcnow().isoformat(),
                 "level": record.levelname,
-                "environment": os.getenv("ENVIRONMENT", "development"),
+                "environment": "production" if not sys.gettrace() else "development",
             }
         )
 
@@ -28,28 +28,24 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 logger = logging.getLogger("chatraghu")
 logger.setLevel(logging.INFO)
 
-# Prevent duplicate logs by not adding handlers if they already exist
-if not logger.handlers:
-    # Console handler with color formatting
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+# Console handler with color formatting
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
 
-    # Create formatter for console
-    formatter = CustomJsonFormatter("%(timestamp)s %(level)s %(name)s %(message)s")
-    console_handler.setFormatter(formatter)
+# Create formatter for console
+formatter = CustomJsonFormatter("%(timestamp)s %(level)s %(name)s %(message)s")
+console_handler.setFormatter(formatter)
 
-    # Add handlers to logger
-    logger.addHandler(console_handler)
+# Add handlers to logger
+logger.addHandler(console_handler)
 
 
-# Add a function to capture errors in Sentry with additional context
+# Add a function to capture errors in Sentry
 def log_error(message: str, error: Exception = None, **kwargs):
-    """Log an error and capture it in Sentry with additional context"""
-    logger.error(message, extra=kwargs)
+    """Log an error and capture it in Sentry"""
+    logger.error(message, **kwargs)
     if error:
         sentry_sdk.capture_exception(error)
-    else:
-        sentry_sdk.capture_message(message, level="error")
 
 
 async def log_request_info(request: Request) -> dict:

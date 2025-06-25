@@ -1,0 +1,10 @@
+---
+description: Minimize the use of global variables to prevent side effects and improve code maintainability.
+alwaysApply: true
+globs: ["*.py"]
+---
+Limit the use of global variables.
+- Prefer passing data as function arguments or returning values.
+- Use class attributes or instance variables for state within objects.
+- If global configuration is necessary, use a structured configuration management approach (e.g., Pydantic settings, environment variables) rather than mutable global variables.
+- Ensure variables have the narrowest possible scope.

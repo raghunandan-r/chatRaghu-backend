@@ -1,0 +1,12 @@
+---
+description: Implement robust and graceful exception handling using try-except blocks.
+alwaysApply: true
+globs: ["*.py"]
+---
+All code must implement graceful exception handling using `try-except` blocks.
+- Catch specific exception types rather than broad `Exception` where possible.
+- Provide meaningful error messages for caught exceptions.
+- Log the exception details (traceback, error message) for debugging.
+- Avoid "bare except" clauses; at minimum, catch `Exception` and log it.
+- Re-raise exceptions if they cannot be fully handled at the current level, or if downstream components need to process them.
+- Differentiate between expected and unexpected errors.

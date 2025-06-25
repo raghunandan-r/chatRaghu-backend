@@ -1,0 +1,16 @@
+---
+description: Guide the AI to use the specified Python frameworks for backend development.
+globs: ["*.py"]
+alwaysApply: true
+---
+---
+description: Guide the AI to use the specified Python frameworks for backend development.
+alwaysApply: true
+globs: ["*.py"]
+---
+When generating Python code for this project, always use the following frameworks:
+- pydantic for data validation and settings.
+- fastapi for API endpoints.
+- pinecone-client for Pinecone interactions.
+- openai for OpenAI API interactions.
+- opik for LLM specific tracing.

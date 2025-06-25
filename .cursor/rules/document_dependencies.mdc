@@ -1,0 +1,9 @@
+---
+description: Ensure all new Python dependencies are documented in requirements.txt.
+alwaysApply: true
+globs: ["requirements.txt", "*.py"]
+---
+Whenever a new Python package is introduced or an existing one's version is changed, its exact version must be added or updated in `requirements.txt`.
+- Pin dependency versions (e.g., `package==1.2.3`).
+- Run `pip freeze > requirements.txt` to generate an updated list, then manually review and prune.
+- If proposing new code that requires a dependency, explicitly state it needs to be added to `requirements.txt`.

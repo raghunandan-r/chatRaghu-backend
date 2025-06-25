@@ -1,0 +1,8 @@
+---
+description: Guide the AI on documentation standards, tech specs, ADRs, and commit messages.
+alwaysApply: true
+---
+All significant changes require well-documented changes.
+- For new features or major changes, propose a brief technical specification (tech spec) or Architectural Decision Record (ADR) outlining the approach.
+- Commit messages should be clear, concise, and follow Conventional Commits (e.g., `feat:`, `fix:`, `docs:`, `chore:`).
+- Document functions and classes with comprehensive docstrings explaining purpose, arguments, and returns (as per PEP 8).
