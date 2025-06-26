@@ -4,10 +4,10 @@ credentials/
 .venv/
 __pycache__/
 .pytest_cache/
-.cursor/
-.logfire/
-.ruff_cache/
-
+.cursor/*
+.logfire/*
+.ruff_cache/*
+.platform/*
 # Environment variables
 .dockerignore
 .env
@@ -17,10 +17,45 @@ __pycache__/
 
 *.pyc
 .python-version
-
+exit
 
 # Elastic Beanstalk Files
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
 .ebextensions/*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/

@@ -1,9 +1,0 @@
----
-description: Guide the AI to break down complex features into small, manageable story cards for development.
-alwaysApply: true
----
-When asked to implement a new feature:
-- Start by clearly defining the feature's scope and desired outcome.
-- Break the feature down into multiple, small, independent story cards or tasks.
-- Each story card should represent a single, deliverable piece of functionality.
-- For AI-generated plans, propose this breakdown before generating code.
