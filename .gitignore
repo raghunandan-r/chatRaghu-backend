@@ -4,8 +4,12 @@ credentials/
 .venv/
 __pycache__/
 .pytest_cache/
+.cursor/
+.logfire/
+.ruff_cache/
 
 # Environment variables
+.dockerignore
 .env
 *.env
 .env.*

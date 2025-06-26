@@ -7,7 +7,12 @@ pandas==2.1.4
 pyarrow==14.0.2
 backoff==2.2.1
 python-multipart==0.0.6
-httpx==0.25.2
+httpx>=0.25.2
 structlog==23.1.0
 python-json-logger==2.0.7
 sentry-sdk==2.23.1
+
+# Testing dependencies
+pytest==8.2.2
+pytest-asyncio==0.20.0
+pytest-httpx==0.29.0

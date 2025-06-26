@@ -16,7 +16,7 @@ import logging
 # from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
 import uvicorn
 import traceback
-from graph.graph import (
+from graph import (
     init_example_selector,
     MessagesState,
     HumanMessage,

@@ -3,9 +3,15 @@ version: '3.3'
 services:
   # Main ChatRaghu backend service
   chatraghu-backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    volumes:
+      # Mounts the host's current directory into the container at /app
+      # This enables live code reloading for the main backend service
+      - ./:/app
     env_file:
       - .env
     environment:
@@ -24,10 +30,14 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    volumes:
+      # Mounts the host's evals-service directory into the container at /app
+      # This enables live code reloading for the evaluation service
+      - ./evals-service:/app
+      # Persist evaluation results outside the container
+      - ./evals-service/eval_results:/app/eval_results
     env_file:
       - .env
-    volumes:
-      - ./evals-service/eval_results:/app/eval_results
     networks:
       - chatraghu-network
 

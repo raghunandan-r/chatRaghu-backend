@@ -47,11 +47,12 @@ exceptiongroup>=1.0.0
 pytest==8.2.2
 pytest-asyncio==0.20.0
 pytest-cov==2.12.1
+pytest-httpx==0.29.0
+pytest-mock==3.10.0
 mypy==0.991
 pylint==2.17.5
 black==23.12.1
 ruff==0.1.9
-pytest-mock==3.10.0
 python-json-logger==2.0.7
 structlog==23.1.0
 gunicorn==21.2.0
