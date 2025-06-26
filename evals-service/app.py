@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
+import os  # Add this import
 
 # Import evaluation modules
 from models import EvaluationResult, ConversationFlow, ResponseMessage
@@ -32,8 +33,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Get storage path from environment variable, with fallback for containerized environments
+storage_path = os.getenv("EVAL_STORAGE_PATH", "/tmp/eval_results")
+
 # Global instances
-evaluator = AsyncEvaluator()
+evaluator = AsyncEvaluator(storage_path=storage_path)
 queue_manager = EvaluationQueueManager()
 
 
