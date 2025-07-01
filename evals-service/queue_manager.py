@@ -1,25 +1,160 @@
 import asyncio
 from typing import Optional
 from utils.logger import logger
-from models import ResponseMessage
+from models import ResponseMessage, EvaluationRequest
+from config import config
 
 
-class EvaluationQueueManager:
+class DualQueueManager:
+    """
+    Manages dual queues for audit logging and evaluation processing.
+    Separates concerns between immediate audit logging and background evaluation.
+    """
+
     def __init__(self):
-        self.queue: asyncio.Queue = asyncio.Queue()
-        self._worker_task: Optional[asyncio.Task] = None
-
-    async def enqueue_response(self, message: ResponseMessage):
-        await self.queue.put(message)
-        logger.info(
-            "Enqueued response for evaluation",
-            extra={"thread_id": message.thread_id, "queue_size": self.queue.qsize()},
+        # Separate queues for different purposes
+        self.audit_queue: asyncio.Queue = asyncio.Queue(
+            maxsize=config.service.max_queue_size
+        )
+        self.eval_queue: asyncio.Queue = asyncio.Queue(
+            maxsize=config.service.max_queue_size
         )
 
-    async def _process_message(self, message: ResponseMessage, evaluator):
+        # Storage managers (will be set by the app)
+        self.audit_storage = None
+        self.results_storage = None
+
+        # Worker tasks
+        self._audit_worker_task: Optional[asyncio.Task] = None
+        self._eval_worker_task: Optional[asyncio.Task] = None
+
+        # Metrics
+        self._audit_processed = 0
+        self._eval_processed = 0
+        self._audit_errors = 0
+        self._eval_errors = 0
+
+        logger.info(
+            "Initialized DualQueueManager",
+            extra={
+                "max_queue_size": config.service.max_queue_size,
+                "queue_worker_count": config.service.queue_worker_count,
+            },
+        )
+
+    def set_storage_managers(self, audit_storage, results_storage):
+        """Set the storage managers for audit and evaluation results."""
+        self.audit_storage = audit_storage
+        self.results_storage = results_storage
+        logger.info("Storage managers configured for DualQueueManager")
+
+    async def enqueue_audit(self, request: EvaluationRequest):
+        """Enqueue a request for immediate audit logging."""
+        try:
+            await self.audit_queue.put(request)
+            logger.info(
+                "Enqueued request for audit logging",
+                extra={
+                    "thread_id": request.thread_id,
+                    "audit_queue_size": self.audit_queue.qsize(),
+                },
+            )
+        except asyncio.QueueFull:
+            self._audit_errors += 1
+            logger.error(
+                "Audit queue is full, dropping request",
+                extra={"thread_id": request.thread_id},
+            )
+            raise
+
+    async def enqueue_evaluation(self, message: ResponseMessage):
+        """Enqueue a response for evaluation processing."""
+        try:
+            await self.eval_queue.put(message)
+            logger.info(
+                "Enqueued response for evaluation",
+                extra={
+                    "thread_id": message.thread_id,
+                    "eval_queue_size": self.eval_queue.qsize(),
+                },
+            )
+        except asyncio.QueueFull:
+            self._eval_errors += 1
+            logger.error(
+                "Evaluation queue is full, dropping request",
+                extra={"thread_id": message.thread_id},
+            )
+            raise
+
+    async def _audit_worker(self):
+        """Worker for processing audit requests."""
+        logger.info("Started audit queue worker")
+
+        while True:
+            try:
+                request = await self.audit_queue.get()
+                await self._process_audit_request(request)
+                self._audit_processed += 1
+            except asyncio.CancelledError:
+                logger.info("Audit worker cancelled")
+                break
+            except Exception as e:
+                self._audit_errors += 1
+                logger.error("Error in audit worker", extra={"error": str(e)})
+            finally:
+                self.audit_queue.task_done()
+
+    async def _eval_worker(self, evaluator):
+        """Worker for processing evaluation requests."""
+        logger.info("Started evaluation queue worker")
+
+        while True:
+            try:
+                message = await self.eval_queue.get()
+                await self._process_evaluation_request(message, evaluator)
+                self._eval_processed += 1
+            except asyncio.CancelledError:
+                logger.info("Evaluation worker cancelled")
+                break
+            except Exception as e:
+                self._eval_errors += 1
+                logger.error("Error in evaluation worker", extra={"error": str(e)})
+            finally:
+                self.eval_queue.task_done()
+
+    async def _process_audit_request(self, request: EvaluationRequest):
+        """Process an audit request and store it."""
         try:
             logger.info(
-                "Processing conversation flow",
+                "Processing audit request",
+                extra={
+                    "thread_id": request.thread_id,
+                    "node_count": len(request.conversation_flow.node_executions),
+                },
+            )
+
+            # Store the audit request if storage manager is available
+            if self.audit_storage:
+                await self.audit_storage.queue.put(request)
+                logger.info(
+                    "Queued audit request for storage",
+                    extra={"thread_id": request.thread_id},
+                )
+            else:
+                logger.warning("No audit storage manager configured")
+
+        except Exception as e:
+            logger.error(
+                "Failed to process audit request",
+                extra={"thread_id": request.thread_id, "error": str(e)},
+            )
+            raise
+
+    async def _process_evaluation_request(self, message: ResponseMessage, evaluator):
+        """Process an evaluation request and store the result."""
+        try:
+            logger.info(
+                "Processing evaluation request",
                 extra={
                     "thread_id": message.thread_id,
                     "node_count": len(message.conversation_flow.node_executions),
@@ -30,13 +165,29 @@ class EvaluationQueueManager:
                 },
             )
 
-            await evaluator.evaluate_response(
+            # Perform the evaluation
+            evaluation_result = await evaluator.evaluate_response(
                 thread_id=message.thread_id,
                 query=message.query,
                 response=message.response,
                 retrieved_docs=message.retrieved_docs,
                 conversation_flow=message.conversation_flow,
             )
+
+            # Store the evaluation result if storage manager is available
+            if self.results_storage:
+                await self.results_storage.queue.put(evaluation_result)
+                logger.info(
+                    "Queued evaluation result for storage",
+                    extra={
+                        "thread_id": message.thread_id,
+                        "overall_success": evaluation_result.metadata.get(
+                            "overall_success", False
+                        ),
+                    },
+                )
+            else:
+                logger.warning("No results storage manager configured")
 
             logger.info(
                 "Successfully evaluated response",
@@ -45,7 +196,7 @@ class EvaluationQueueManager:
         except Exception as e:
             if message.retry_count < message.max_retries:
                 message.retry_count += 1
-                await self.queue.put(message)
+                await self.eval_queue.put(message)
                 logger.warning(
                     f"Evaluation failed, retrying {message.retry_count}/{message.max_retries}",
                     extra={"thread_id": message.thread_id, "error": str(e)},
@@ -59,24 +210,68 @@ class EvaluationQueueManager:
                     },
                 )
 
-    async def _worker(self, evaluator):
-        while True:
-            try:
-                message = await self.queue.get()
-                await self._process_message(message, evaluator)
-            except Exception as e:
-                logger.error("Worker error", extra={"error": str(e)})
-            finally:
-                self.queue.task_done()
-
     async def start(self, evaluator):
-        self._worker_task = asyncio.create_task(self._worker(evaluator))
-        logger.info("Started evaluation queue worker")
+        """Start both queue workers."""
+        self._audit_worker_task = asyncio.create_task(self._audit_worker())
+        self._eval_worker_task = asyncio.create_task(self._eval_worker(evaluator))
+        logger.info("Started dual queue workers")
 
     async def stop(self):
-        if self._worker_task:
-            self._worker_task.cancel()
+        """Stop both queue workers."""
+        if self._audit_worker_task:
+            self._audit_worker_task.cancel()
             try:
-                await self._worker_task
+                await self._audit_worker_task
             except asyncio.CancelledError:
-                logger.info("Evaluation queue worker stopped")
+                pass
+
+        if self._eval_worker_task:
+            self._eval_worker_task.cancel()
+            try:
+                await self._eval_worker_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("Stopped dual queue workers")
+
+    async def health_check(self) -> dict:
+        """Perform health check on queue system."""
+        try:
+            audit_worker_healthy = (
+                self._audit_worker_task is not None
+                and not self._audit_worker_task.done()
+            )
+            eval_worker_healthy = (
+                self._eval_worker_task is not None and not self._eval_worker_task.done()
+            )
+
+            return {
+                "queue_manager_healthy": audit_worker_healthy and eval_worker_healthy,
+                "audit_worker_healthy": audit_worker_healthy,
+                "eval_worker_healthy": eval_worker_healthy,
+                "audit_queue_size": self.audit_queue.qsize(),
+                "eval_queue_size": self.eval_queue.qsize(),
+                "audit_processed": self._audit_processed,
+                "eval_processed": self._eval_processed,
+                "audit_errors": self._audit_errors,
+                "eval_errors": self._eval_errors,
+            }
+        except Exception as e:
+            logger.error("Queue manager health check failed", extra={"error": str(e)})
+            return {"queue_manager_healthy": False, "error": str(e)}
+
+    async def get_metrics(self) -> dict:
+        """Get queue manager metrics."""
+        return {
+            "audit_queue_size": self.audit_queue.qsize(),
+            "eval_queue_size": self.eval_queue.qsize(),
+            "audit_processed": self._audit_processed,
+            "eval_processed": self._eval_processed,
+            "audit_errors": self._audit_errors,
+            "eval_errors": self._eval_errors,
+            "max_queue_size": config.service.max_queue_size,
+        }
+
+
+# Legacy compatibility - keep the old class name for backward compatibility
+EvaluationQueueManager = DualQueueManager

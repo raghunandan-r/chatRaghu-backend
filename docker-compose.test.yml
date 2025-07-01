@@ -1,7 +1,7 @@
 version: '3.3'
 
 services:
-  # Main ChatRaghu backend service
+  # Main ChatRaghu backend service (same as production, but with real eval client)
   chatraghu-backend:
     build:
       context: .
@@ -9,21 +9,19 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Mounts the host's current directory into the container at /app
-      # This enables live code reloading for the main backend service
       - ./:/app
     env_file:
       - .env
     environment:
       - EVALUATION_SERVICE_URL=http://evaluation-service:8001
       - EVALUATION_SERVICE_TIMEOUT=30
-      - MOCK_EVAL_CLIENT=true
+      - MOCK_EVAL_CLIENT=false  # Use the REAL client for testing
     depends_on:
       - evaluation-service
     networks:
       - chatraghu-network
 
-  # Evaluation service
+  # Evaluation service with test overrides
   evaluation-service:
     build:
       context: ./evals-service
@@ -31,15 +29,15 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      # Mounts the host's evals-service directory into the container at /app
-      # This enables live code reloading for the evaluation service
       - ./evals-service:/app
-      # Persist evaluation results outside the container
       - ./evals-service/eval_results:/app/eval_results
-      # Persist audit data outside the container
       - ./evals-service/audit_data:/app/audit_data
     env_file:
       - .env
+    environment:
+      # Test-specific overrides
+      - STORAGE_BATCH_SIZE=1 # Write files immediately for tests
+      - STORAGE_WRITE_TIMEOUT_SECONDS=5.0
     networks:
       - chatraghu-network
 

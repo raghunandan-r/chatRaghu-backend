@@ -91,8 +91,8 @@ class RetrievalNodeMixin:
             if msg.tool_name == "retrieve" and msg.output:
                 if isinstance(msg.output, list):
                     for result in msg.output:
-                        if hasattr(result, "dict"):
-                            retrieved_docs.append(result.dict())
+                        if hasattr(result, "model_dump"):
+                            retrieved_docs.append(result.model_dump())
                         else:
                             retrieved_docs.append(
                                 {"content": str(result), "metadata": {}}

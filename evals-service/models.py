@@ -3,30 +3,6 @@ from typing import Dict, List, Optional, Literal, Any
 from datetime import datetime
 
 
-class EvaluationResult(BaseModel):
-    thread_id: str
-    timestamp: datetime
-    query: str
-    response: str
-    retrieved_docs: Optional[List[Dict[str, str]]]
-    scores: Dict[str, float]
-    metadata: Dict[str, Any]
-
-
-class EvaluationMetrics(BaseModel):
-    correctness_score: float
-    relevance_score: float
-    groundedness_score: float
-    persona_consistency_score: float
-    retrieval_quality_score: float
-
-
-class RetryConfig(BaseModel):
-    max_retries: int = 3
-    delay_seconds: int = 5
-    backoff_factor: float = 2.0
-
-
 class NodeMessage(BaseModel):
     """Represents a message with its associated node context"""
 
@@ -78,6 +54,46 @@ class ConversationFlow(BaseModel):
         default_factory=list
     )  # Updated to use EnrichedNodeExecutionLog
     final_response: Optional[str] = None
+
+
+class EvaluationRequest(BaseModel):
+    """Request model for evaluation"""
+
+    thread_id: str
+    query: str
+    response: str
+    retrieved_docs: Optional[List[Dict[str, str]]] = None
+    conversation_flow: ConversationFlow
+
+    class Config:
+        # Enable forward references
+        from_attributes = True
+
+
+class EvaluationResult(BaseModel):
+    thread_id: str
+    timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    query: Optional[str] = None
+    response: Optional[str] = None
+    retrieved_docs: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+    evaluations: Optional[Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Store full evaluation objects
+    metadata: Dict[str, Any]
+
+
+class EvaluationMetrics(BaseModel):
+    correctness_score: float
+    relevance_score: float
+    groundedness_score: float
+    persona_consistency_score: float
+    retrieval_quality_score: float
+
+
+class RetryConfig(BaseModel):
+    max_retries: int = 3
+    delay_seconds: int = 5
+    backoff_factor: float = 2.0
 
 
 class ResponseMessage(BaseModel):

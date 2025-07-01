@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+When implementing or modifying features, always strive for high test coverage.
+
+## Test Structure Guidelines
+
+### Before Creating New Test Files
+1. **ALWAYS check `/tests` directory first** to understand existing test structure
+2. **Look for existing test files** that match the scope of what you're testing
+3. **Only create new test files** if no existing file matches the test scope
+4. **Consolidate related tests** into existing files rather than creating new ones
+
+### Current Test Organization
+- `test_unit.py` - All unit tests (main service, evaluation service, components)
+- `test_integration.py` - All integration tests (service-to-service, storage flows)
+- `test_graph.py` - All graph-related tests (structure, nodes, assembly)
+
+### Test Writing Guidelines
+- Write unit and integration tests for all new functionalities
+- Tests should have clear, useful assertions that validate expected behavior, not just execution
+- Consider edge cases and error scenarios in your tests
+- Place tests in the appropriate existing file based on test type
+- Use appropriate pytest markers for categorization
+
+### Import Handling
+- Handle import errors gracefully with try/except blocks
+- Use conditional imports for optional dependencies
+- Add proper path management for cross-module imports
+- Log warnings when components are not available rather than failing tests
+
+### Test Maintenance
+- Keep tests organized and well-documented
+- Use descriptive test names and docstrings
+- Group related tests in classes
+- Maintain backward compatibility with existing test structure

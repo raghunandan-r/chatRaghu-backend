@@ -13,6 +13,11 @@ COPY --chown=appuser:appuser requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create storage directories with proper permissions
+RUN mkdir -p /app/audit_data /app/eval_results && \
+    chown -R appuser:appuser /app/audit_data /app/eval_results && \
+    chmod -R 755 /app/audit_data /app/eval_results
+
 # Switch to the non-root user
 USER appuser
 

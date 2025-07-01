@@ -18,6 +18,7 @@ __pycache__/
 *.pyc
 .python-version
 exit
+plan.md
 
 # Elastic Beanstalk Files
 .elasticbeanstalk/*

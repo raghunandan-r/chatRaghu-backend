@@ -11,15 +11,19 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, Any, AsyncGenerator
-from evaluation_models import ConversationFlow, EnrichedNodeExecutionLog
+import sys
+from pathlib import Path
+from dotenv import load_dotenv
+from models import ConversationFlow, EnrichedNodeExecutionLog
 
 try:
     import pytest_httpx
 except ImportError:
     pytest_httpx = None
 
-# Load environment variables from .env file
-from dotenv import load_dotenv
+# Add evals-service to path for imports BEFORE any other imports
+evals_path = Path(__file__).parent.parent / "evals-service"
+sys.path.insert(0, str(evals_path))
 
 load_dotenv()
 
