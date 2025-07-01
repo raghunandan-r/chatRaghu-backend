@@ -997,9 +997,11 @@ async def execute_stream_impl(
             node_log = EnrichedNodeExecutionLog(
                 node_name=current_node,
                 input={
-                    "messages": [msg.dict() for msg in state.messages],
+                    "messages": [msg.model_dump() for msg in state.messages],
                     "thread_id": state.thread_id,
-                    "conversation_history": [msg.dict() for msg in state.messages[:-1]]
+                    "conversation_history": [
+                        msg.model_dump() for msg in state.messages[:-1]
+                    ]
                     if len(state.messages) > 1
                     else [],
                 },
@@ -1089,15 +1091,15 @@ async def execute_stream_impl(
                             if isinstance(doc, list):
                                 # Handle list of RetrievalResult objects
                                 for result in doc:
-                                    if hasattr(result, "dict"):
-                                        converted_docs.append(result.dict())
+                                    if hasattr(result, "model_dump"):
+                                        converted_docs.append(result.model_dump())
                                     else:
                                         converted_docs.append(
                                             {"content": str(result), "metadata": {}}
                                         )
-                            elif hasattr(doc, "dict"):
+                            elif hasattr(doc, "model_dump"):
                                 # Handle single RetrievalResult object
-                                converted_docs.append(doc.dict())
+                                converted_docs.append(doc.model_dump())
                             else:
                                 # Handle other types
                                 converted_docs.append(
@@ -1135,7 +1137,7 @@ async def execute_stream_impl(
 
                 # Update node log with output
                 node_log.output["messages"] = [
-                    msg.dict() for msg in state.messages[-1:]
+                    msg.model_dump() for msg in state.messages[-1:]
                 ]
                 node_log.end_time = datetime.utcnow()
 

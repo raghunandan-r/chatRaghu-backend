@@ -36,6 +36,8 @@ services:
       - ./evals-service:/app
       # Persist evaluation results outside the container
       - ./evals-service/eval_results:/app/eval_results
+      # Persist audit data outside the container
+      - ./evals-service/audit_data:/app/audit_data
     env_file:
       - .env
     networks:

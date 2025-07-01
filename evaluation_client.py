@@ -260,9 +260,7 @@ async def get_evaluation_client() -> EvaluationClient:
             evaluation_client = MockEvaluationClient()
         else:
             # Get configuration from environment
-            eval_service_url = os.getenv(
-                "EVALUATION_SERVICE_URL", "http://localhost:8001"
-            )
+            eval_service_url = os.getenv("EVALUATION_SERVICE_URL")
             timeout = int(os.getenv("EVALUATION_SERVICE_TIMEOUT", "30"))
             evaluation_client = EvaluationClient(
                 base_url=eval_service_url, timeout=timeout

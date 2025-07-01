@@ -1,18 +1,23 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.0
+pydantic==2.8.2
+pydantic-settings>=2.3.0
 python-dotenv==1.0.0
-openai==1.3.7
+openai==1.70.0
 pandas==2.1.4
 pyarrow==14.0.2
 backoff==2.2.1
 python-multipart==0.0.6
 httpx>=0.25.2
 structlog==23.1.0
-python-json-logger==2.0.7
-sentry-sdk==2.23.1
+instructor==1.9.0
 
 # Testing dependencies
 pytest==8.2.2
 pytest-asyncio==0.20.0
 pytest-httpx==0.29.0
+
+# logging
+sentry-sdk==2.23.1
+opik>=1.7.40
+python-json-logger==2.0.7

@@ -24,7 +24,7 @@ repos:
     hooks:
       - id: pytest
         name: pytest
-        entry: pytest
+        entry: bash -c 'PYTHONPATH=evals-service pytest'
         language: system
         pass_filenames: false
         always_run: true
