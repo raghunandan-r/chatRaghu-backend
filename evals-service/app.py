@@ -61,8 +61,9 @@ async def lifespan(app: FastAPI):
             extra={"backend_type": "LocalStorageBackend"},
         )
 
-    audit_backend = LocalStorageBackend(config.storage.audit_data_path)
-    results_backend = LocalStorageBackend(config.storage.eval_results_path)
+        # Create separate backend instances for local storage
+        audit_backend = LocalStorageBackend(config.storage.audit_data_path)
+        results_backend = LocalStorageBackend(config.storage.eval_results_path)
 
     # Create separate storage queues
     audit_storage_queue = asyncio.Queue(maxsize=config.service.max_queue_size)
