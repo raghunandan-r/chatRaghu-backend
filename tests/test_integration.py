@@ -522,10 +522,18 @@ async def test_ruthless_end_to_end_flow(
 
 
 @pytest.mark.integration
-# @pytest.mark.skipif(
-#     not all(os.getenv(k) for k in ["STORAGE_GCS_AUDIT_BUCKET_NAME", "STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME", "GOOGLE_APPLICATION_CREDENTIALS"]) or _storage is None,
-#     reason="This test requires real GCS credentials and the google-cloud-storage library."
-# )
+@pytest.mark.skipif(
+    not all(
+        os.getenv(k)
+        for k in [
+            "STORAGE_GCS_AUDIT_BUCKET_NAME",
+            "STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ]
+    )
+    or _storage is None,
+    reason="This test requires real GCS credentials and the google-cloud-storage library.",
+)
 @pytest.mark.asyncio
 async def test_gcs_only_end_to_end_write_and_verify(
     http_client,
@@ -535,13 +543,8 @@ async def test_gcs_only_end_to_end_write_and_verify(
     This test verifies that the evals-service, when configured to use GCS,
     successfully writes a file to the bucket. It then cleans up the created file.
 
-    IMPORTANT: To run this test, you must start your services with the GCS
-    environment configuration. For example:
-    `docker-compose --env-file gcs_test.env up --build`
-
     This ensures the `evals-service` is using the GCSStorageBackend.
     """
-    logger.info("--- Starting GCS-only end-to-end write and verify test ---")
 
     gcs_audit_bucket_name = os.getenv("STORAGE_GCS_AUDIT_BUCKET_NAME")
     gcs_results_bucket_name = os.getenv("STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME")
@@ -551,6 +554,30 @@ async def test_gcs_only_end_to_end_write_and_verify(
 
     logger.info(f"Targeting GCS audit bucket: {gcs_audit_bucket_name}")
     logger.info(f"Targeting GCS results bucket: {gcs_results_bucket_name}")
+
+    # --- Fast-fail check: ensure evals-service actually instantiated GCS backends ---
+    metrics_resp = await http_client.get(f"{EVALUATION_SERVICE_URL}/metrics")
+    metrics_resp.raise_for_status()
+    metrics_json = metrics_resp.json()
+
+    try:
+        audit_backend_type = metrics_json["components"]["audit_storage"][
+            "backend_metrics"
+        ]["backend_type"]
+        result_backend_type = metrics_json["components"]["results_storage"][
+            "backend_metrics"
+        ]["backend_type"]
+    except KeyError as e:
+        pytest.fail(
+            f"Unexpected metrics schema – missing key {e}. Full payload: {metrics_json}"
+        )
+
+    if audit_backend_type != "gcs" or result_backend_type != "gcs":
+        pytest.fail(
+            "Evaluation service is not using GCS backends as expected: "
+            f"audit_backend={audit_backend_type}, result_backend={result_backend_type}. "
+            "Check STORAGE_* env vars and service startup logs."
+        )
 
     # 1. Send a unique chat request.
     unique_id = f"gcs-e2e-test-{int(time.time())}"
@@ -651,6 +678,8 @@ async def test_gcs_only_end_to_end_write_and_verify(
                         f"Cleaning up test file: {blob.name} from bucket {blob.bucket.name}"
                     )
                     blob.delete()
+                    if blob.exists():
+                        pytest.fail(f"blob {blob.name} could not be deleted")
                     logger.info(f"Successfully deleted: {blob.name}")
                 except Exception as e:
                     logger.error(f"Failed to delete {blob.name}: {e}")
