@@ -40,6 +40,9 @@ services:
       - ./evals-service/audit_data:/app/audit_data
     env_file:
       - .env
+    environment:
+      - STORAGE_BATCH_SIZE=50
+      - STORAGE_WRITE_TIMEOUT_SECONDS=300
     networks:
       - chatraghu-network
 

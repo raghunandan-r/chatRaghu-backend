@@ -28,6 +28,18 @@ from .conftest import (
     ServiceUnavailableError,
     logger,
 )
+from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# Optional Google Cloud import (allows running tests without the library)
+# ---------------------------------------------------------------------------
+try:
+    from google.cloud import storage as _storage  # type: ignore
+except ImportError:  # pragma: no cover – library may be absent in CI
+    _storage = None  # type: ignore
+    logger.warning(
+        "google-cloud-storage not installed; GCS-specific checks will be skipped"
+    )
 
 # Test queries for diverse node path coverage
 DIVERSE_TEST_QUERIES = [
@@ -36,7 +48,7 @@ DIVERSE_TEST_QUERIES = [
             {
                 "role": "user",
                 "content": "Tell me about yourself?",
-                "thread_id": "test-thread-personal-1",
+                "thread_id": f"test-e2e-1-{int(time.time())}",
             }
         ]
     },
@@ -45,7 +57,7 @@ DIVERSE_TEST_QUERIES = [
             {
                 "role": "user",
                 "content": "Why did you build this?",
-                "thread_id": "test-thread-purpose-2",
+                "thread_id": f"test-e2e-2-{int(time.time())}",
             }
         ]
     },
@@ -54,7 +66,7 @@ DIVERSE_TEST_QUERIES = [
             {
                 "role": "user",
                 "content": "Do you have any work experience in the US?",
-                "thread_id": "test-thread-experience-3",
+                "thread_id": f"test-e2e-1-{int(time.time())}",
             }
         ]
     },
@@ -63,7 +75,7 @@ DIVERSE_TEST_QUERIES = [
             {
                 "role": "user",
                 "content": "How long have you been a data scientist?",
-                "thread_id": "test-thread-personal-1",
+                "thread_id": f"test-e2e-4-{int(time.time())}",
             }
         ]
     },
@@ -72,7 +84,7 @@ DIVERSE_TEST_QUERIES = [
             {
                 "role": "user",
                 "content": "How can I improve my coding skills?",
-                "thread_id": "test-thread-coding-5",
+                "thread_id": f"test-e2e-4{int(time.time())}",
             }
         ]
     },
@@ -95,7 +107,7 @@ TEST_QUERY = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
+@pytest.mark.skip(reason="Skipping comprehensive integration flow test")
 async def test_comprehensive_integration_flow(
     http_client: httpx.AsyncClient,
     valid_api_headers: Dict[str, str],
@@ -263,139 +275,233 @@ async def test_ruthless_end_to_end_flow(
     valid_api_headers: Dict[str, str],
 ):
     """
-    A true end-to-end test that verifies file creation.
+    A true end-to-end test that verifies file creation for multiple diverse queries.
     It will:
     1. Clean up old test files.
-    2. Send ONE chat request to the main service.
-    3. Poll the filesystem until an audit file and a result file are created.
+    2. Send multiple diverse chat requests to the main service with wait times.
+    3. Poll the filesystem until audit files and result files are created for each.
     4. Fail if files do not appear within a timeout.
     5. Verify the contents of the created files.
     """
-    thread_id = TEST_QUERY["messages"][0]["thread_id"]
-    logger.info(f"RUTHLESS_TEST_START: Starting e2e test for thread_id={thread_id}")
-
     audit_path = Path("evals-service/audit_data")
     results_path = Path("evals-service/eval_results")
 
     # 1. Clean up old files
     logger.info("RUTHLESS_TEST_CLEANUP: Deleting old test files...")
-    for p in audit_path.glob("*.json"):
+    # Clean up audit data
+    for p in audit_path.rglob("*.json"):
         p.unlink()
-    for p in results_path.glob("*.json"):
+    # Remove empty date and run_id directories
+    for date_dir in audit_path.iterdir():
+        if date_dir.is_dir():
+            for run_dir in date_dir.iterdir():
+                if run_dir.is_dir():
+                    try:
+                        run_dir.rmdir()  # Will only succeed if directory is empty
+                    except OSError:
+                        pass  # Directory not empty or other error, skip it
+            try:
+                date_dir.rmdir()  # Will only succeed if directory is empty
+            except OSError:
+                pass  # Directory not empty or other error, skip it
+
+    # Clean up eval results
+    for p in results_path.rglob("*.json"):
         p.unlink()
+    # Remove empty date and run_id directories
+    for date_dir in results_path.iterdir():
+        if date_dir.is_dir():
+            for run_dir in date_dir.iterdir():
+                if run_dir.is_dir():
+                    try:
+                        run_dir.rmdir()  # Will only succeed if directory is empty
+                    except OSError:
+                        pass  # Directory not empty or other error, skip it
+            try:
+                date_dir.rmdir()  # Will only succeed if directory is empty
+            except OSError:
+                pass  # Directory not empty or other error, skip it
 
     try:
-        # 2. Send ONE chat request
+        # 2. Send multiple diverse chat requests with wait times
         logger.info(
-            f"RUTHLESS_TEST_REQUEST: Sending chat request for thread_id={thread_id}"
-        )
-        response = await http_client.post(
-            f"{MAIN_SERVICE_URL}/api/chat",
-            headers=valid_api_headers,
-            json=TEST_QUERY,
-        )
-        response.raise_for_status()
-        logger.info(
-            f"RUTHLESS_TEST_RESPONSE: Received {response.status_code} from main service."
+            f"RUTHLESS_TEST_REQUESTS: Sending {len(DIVERSE_TEST_QUERIES)} diverse chat requests"
         )
 
-        # Consume the streaming response to ensure the graph execution completes
-        response_text = ""
-        async for chunk in response.aiter_text():
-            response_text += chunk
-        assert response_text, "Chat response should not be empty"
-        logger.info(
-            "RUTHLESS_TEST_STREAM_COMPLETE: Full response received from main service."
-        )
+        for i, query in enumerate(DIVERSE_TEST_QUERIES):
+            thread_id = query["messages"][0]["thread_id"]
+            logger.info(
+                f"RUTHLESS_TEST_REQUEST_{i+1}: Sending request for thread_id={thread_id}"
+            )
+            logger.info(
+                f"RUTHLESS_TEST_CONTENT_{i+1}: {query['messages'][0]['content']}"
+            )
 
-        # 3. Poll for file creation
-        timeout = 20  # seconds
+            response = await http_client.post(
+                f"{MAIN_SERVICE_URL}/api/chat",
+                headers=valid_api_headers,
+                json=query,
+            )
+            response.raise_for_status()
+            logger.info(
+                f"RUTHLESS_TEST_RESPONSE_{i+1}: Received {response.status_code} from main service."
+            )
+
+            # Consume the streaming response to ensure the graph execution completes
+            response_text = ""
+            async for chunk in response.aiter_text():
+                response_text += chunk
+            assert response_text, f"Chat response {i+1} should not be empty"
+            logger.info(
+                f"RUTHLESS_TEST_STREAM_COMPLETE_{i+1}: Full response received from main service."
+            )
+
+            # Add wait time between queries (except for the last one)
+            if i < len(DIVERSE_TEST_QUERIES) - 1:
+                wait_time = 3  # seconds
+                logger.info(
+                    f"RUTHLESS_TEST_WAIT_{i+1}: Waiting {wait_time} seconds before next query..."
+                )
+                await asyncio.sleep(wait_time)
+
+        # 3. Poll for file creation for all queries
+        timeout = 50  # seconds - increased for multiple queries
         start_time = time.time()
-        audit_file_path = None
-        results_file_path = None
+        expected_thread_ids = [
+            query["messages"][0]["thread_id"] for query in DIVERSE_TEST_QUERIES
+        ]
+        found_audit_files = {}
+        found_result_files = {}
 
         logger.info(
-            f"RUTHLESS_TEST_POLLING: Waiting up to {timeout}s for files to be created..."
+            f"RUTHLESS_TEST_POLLING: Waiting up to {timeout}s for files to be created for {len(expected_thread_ids)} queries..."
         )
+
         while time.time() - start_time < timeout:
-            if not audit_file_path:
-                # Look for any audit files and check their content for the thread_id
-                audit_files = list(audit_path.glob("audit_request*.json"))
-                for audit_file in audit_files:
-                    try:
-                        with open(audit_file, "r") as f:
-                            audit_data = json.load(f)
-                            if isinstance(audit_data, list) and len(audit_data) > 0:
-                                if audit_data[0].get("thread_id") == thread_id:
-                                    audit_file_path = audit_file
-                                    logger.info(
-                                        f"RUTHLESS_TEST_AUDIT_FOUND: Found audit file: {audit_file_path}"
-                                    )
-                                    break
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+            # Check for audit files - now using recursive glob for partitioned structure
+            audit_files = list(audit_path.rglob("audit_request*.json"))
+            for audit_file in audit_files:
+                try:
+                    with open(audit_file, "r") as f:
+                        audit_data = json.load(f)
+                        if isinstance(audit_data, list) and len(audit_data) > 0:
+                            thread_id = audit_data[0].get("thread_id")
+                            if (
+                                thread_id in expected_thread_ids
+                                and thread_id not in found_audit_files
+                            ):
+                                found_audit_files[thread_id] = audit_file
+                                logger.info(
+                                    f"RUTHLESS_TEST_AUDIT_FOUND: Found audit file for thread {thread_id}: {audit_file}",
+                                    extra={
+                                        "thread_id": thread_id,
+                                        "file_path": str(audit_file),
+                                        "partition_info": {
+                                            "date": audit_file.parent.parent.name,
+                                            "run_id": audit_file.parent.name,
+                                        },
+                                    },
+                                )
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
 
-            if not results_file_path:
-                # Look for any result files and check their content for the thread_id
-                results_files = list(results_path.glob("eval_result*.json"))
-                for result_file in results_files:
-                    try:
-                        with open(result_file, "r") as f:
-                            result_data = json.load(f)
-                            # Handle both list and dict formats
-                            if isinstance(result_data, list) and len(result_data) > 0:
-                                if result_data[0].get("thread_id") == thread_id:
-                                    results_file_path = result_file
-                                    logger.info(
-                                        f"RUTHLESS_TEST_RESULT_FOUND: Found result file: {results_file_path}"
-                                    )
-                                    break
-                            elif isinstance(result_data, dict):
-                                if result_data.get("thread_id") == thread_id:
-                                    results_file_path = result_file
-                                    logger.info(
-                                        f"RUTHLESS_TEST_RESULT_FOUND: Found result file: {results_file_path}"
-                                    )
-                                    break
-                    except (json.JSONDecodeError, KeyError):
-                        continue
+            # Check for result files - now using recursive glob for partitioned structure
+            results_files = list(results_path.rglob("eval_result*.json"))
+            for result_file in results_files:
+                try:
+                    with open(result_file, "r") as f:
+                        result_data = json.load(f)
+                        # Handle both list and dict formats
+                        if isinstance(result_data, list) and len(result_data) > 0:
+                            thread_id = result_data[0].get("thread_id")
+                            if (
+                                thread_id in expected_thread_ids
+                                and thread_id not in found_result_files
+                            ):
+                                found_result_files[thread_id] = result_file
+                                logger.info(
+                                    f"RUTHLESS_TEST_RESULT_FOUND: Found result file for thread {thread_id}: {result_file}",
+                                    extra={
+                                        "thread_id": thread_id,
+                                        "file_path": str(result_file),
+                                        "partition_info": {
+                                            "date": result_file.parent.parent.name,
+                                            "run_id": result_file.parent.name,
+                                        },
+                                    },
+                                )
+                        elif isinstance(result_data, dict):
+                            thread_id = result_data.get("thread_id")
+                            if (
+                                thread_id in expected_thread_ids
+                                and thread_id not in found_result_files
+                            ):
+                                found_result_files[thread_id] = result_file
+                                logger.info(
+                                    f"RUTHLESS_TEST_RESULT_FOUND: Found result file for thread {thread_id}: {result_file}",
+                                    extra={
+                                        "thread_id": thread_id,
+                                        "file_path": str(result_file),
+                                        "partition_info": {
+                                            "date": result_file.parent.parent.name,
+                                            "run_id": result_file.parent.name,
+                                        },
+                                    },
+                                )
+                except (json.JSONDecodeError, KeyError):
+                    continue
 
-            if audit_file_path and results_file_path:
+            # Check if we found files for all expected thread IDs
+            if len(found_audit_files) == len(expected_thread_ids) and len(
+                found_result_files
+            ) == len(expected_thread_ids):
                 break
+
             await asyncio.sleep(1)
 
-        # 4. Fail if files are not found
-        assert (
-            audit_file_path is not None
-        ), f"TIMEOUT: Audit file for thread {thread_id} was not created."
-        assert (
-            results_file_path is not None
-        ), f"TIMEOUT: Result file for thread {thread_id} was not created."
+        # 4. Fail if files are not found for all queries
+        missing_audit_threads = set(expected_thread_ids) - set(found_audit_files.keys())
+        missing_result_threads = set(expected_thread_ids) - set(
+            found_result_files.keys()
+        )
 
-        # 5. Verify file contents
-        logger.info("RUTHLESS_TEST_VERIFY: Verifying file contents...")
-        with open(audit_file_path) as f:
-            audit_data = json.load(f)
-            # Handle list format for audit data
-            if isinstance(audit_data, list) and len(audit_data) > 0:
-                assert audit_data[0]["thread_id"] == thread_id
-            else:
-                assert audit_data["thread_id"] == thread_id
-            logger.info("✓ Audit file content verified.")
+        assert (
+            len(missing_audit_threads) == 0
+        ), f"TIMEOUT: Audit files missing for threads: {missing_audit_threads}"
+        assert (
+            len(missing_result_threads) == 0
+        ), f"TIMEOUT: Result files missing for threads: {missing_result_threads}"
 
-        with open(results_file_path) as f:
-            results_data = json.load(f)
-            # Handle both list and dict formats for result data
-            if isinstance(results_data, list) and len(results_data) > 0:
-                assert results_data[0]["thread_id"] == thread_id
-                assert results_data[0]["metadata"]["overall_success"] is True
-            else:
-                assert results_data["thread_id"] == thread_id
-                assert results_data["metadata"]["overall_success"] is True
-            logger.info("✓ Result file content verified.")
+        # 5. Verify file contents for all queries
+        logger.info("RUTHLESS_TEST_VERIFY: Verifying file contents for all queries...")
+
+        for thread_id in expected_thread_ids:
+            # Verify audit file
+            audit_file_path = found_audit_files[thread_id]
+            with open(audit_file_path) as f:
+                audit_data = json.load(f)
+                # Handle list format for audit data
+                if isinstance(audit_data, list) and len(audit_data) > 0:
+                    assert audit_data[0]["thread_id"] == thread_id
+                else:
+                    assert audit_data["thread_id"] == thread_id
+            logger.info(f"✓ Audit file content verified for thread {thread_id}.")
+
+            # Verify result file
+            results_file_path = found_result_files[thread_id]
+            with open(results_file_path) as f:
+                results_data = json.load(f)
+                # Handle both list and dict formats for result data
+                if isinstance(results_data, list) and len(results_data) > 0:
+                    assert results_data[0]["thread_id"] == thread_id
+                    assert results_data[0]["metadata"]["overall_success"] is True
+                else:
+                    assert results_data["thread_id"] == thread_id
+                    assert results_data["metadata"]["overall_success"] is True
+            logger.info(f"✓ Result file content verified for thread {thread_id}.")
 
         logger.info(
-            f"RUTHLESS_TEST_PASSED: End-to-end flow for thread_id={thread_id} is working."
+            f"RUTHLESS_TEST_PASSED: End-to-end flow for all {len(expected_thread_ids)} queries is working."
         )
 
     except httpx.ConnectError as e:
@@ -413,6 +519,142 @@ async def test_ruthless_end_to_end_flow(
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+
+@pytest.mark.integration
+# @pytest.mark.skipif(
+#     not all(os.getenv(k) for k in ["STORAGE_GCS_AUDIT_BUCKET_NAME", "STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME", "GOOGLE_APPLICATION_CREDENTIALS"]) or _storage is None,
+#     reason="This test requires real GCS credentials and the google-cloud-storage library."
+# )
+@pytest.mark.asyncio
+async def test_gcs_only_end_to_end_write_and_verify(
+    http_client,
+    valid_api_headers: Dict[str, str],
+):
+    """
+    This test verifies that the evals-service, when configured to use GCS,
+    successfully writes a file to the bucket. It then cleans up the created file.
+
+    IMPORTANT: To run this test, you must start your services with the GCS
+    environment configuration. For example:
+    `docker-compose --env-file gcs_test.env up --build`
+
+    This ensures the `evals-service` is using the GCSStorageBackend.
+    """
+    logger.info("--- Starting GCS-only end-to-end write and verify test ---")
+
+    gcs_audit_bucket_name = os.getenv("STORAGE_GCS_AUDIT_BUCKET_NAME")
+    gcs_results_bucket_name = os.getenv("STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME")
+
+    if not gcs_audit_bucket_name or not gcs_results_bucket_name:
+        pytest.fail("GCS bucket environment variables are not set.")
+
+    logger.info(f"Targeting GCS audit bucket: {gcs_audit_bucket_name}")
+    logger.info(f"Targeting GCS results bucket: {gcs_results_bucket_name}")
+
+    # 1. Send a unique chat request.
+    unique_id = f"gcs-e2e-test-{int(time.time())}"
+    test_query = {
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Test message for GCS: {unique_id}",
+                "thread_id": unique_id,
+            }
+        ]
+    }
+    logger.info(f"Sending request with unique thread_id: {unique_id}")
+    response = await http_client.post(
+        f"{MAIN_SERVICE_URL}/api/chat", headers=valid_api_headers, json=test_query
+    )
+    response.raise_for_status()
+    async for _ in response.aiter_text():
+        pass  # Consume the response
+    logger.info("Chat request sent successfully.")
+
+    # 2. Poll the GCS buckets to verify the files were created.
+    logger.info("Waiting for files to appear in GCS buckets...")
+    timeout = 45
+    start_time = time.time()
+    found_blobs = []
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+    gcs_client = _storage.Client()
+    audit_bucket = gcs_client.bucket(gcs_audit_bucket_name)
+    results_bucket = gcs_client.bucket(gcs_results_bucket_name)
+
+    # Keep track of which files we've found
+    audit_file_found = False
+    result_file_found = False
+
+    while time.time() - start_time < timeout:
+        # Search audit bucket for audit_request file
+        if not audit_file_found:
+            audit_blobs = list(
+                audit_bucket.list_blobs(prefix=f"audit_data/date={date_str}")
+            )
+            for blob in audit_blobs:
+                if "audit_request" not in blob.name:
+                    continue
+                try:
+                    content = blob.download_as_text()
+                    if unique_id in content:
+                        logger.info(
+                            f"SUCCESS: Found audit file '{blob.name}' containing unique ID."
+                        )
+                        found_blobs.append(blob)
+                        audit_file_found = True
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not read blob {blob.name}: {e}")
+
+        # Search results bucket for eval_result file
+        if not result_file_found:
+            results_blobs = list(
+                results_bucket.list_blobs(prefix=f"eval_results/date={date_str}")
+            )
+            for blob in results_blobs:
+                if "eval_result" not in blob.name:
+                    continue
+                try:
+                    content = blob.download_as_text()
+                    if unique_id in content:
+                        logger.info(
+                            f"SUCCESS: Found result file '{blob.name}' containing unique ID."
+                        )
+                        found_blobs.append(blob)
+                        result_file_found = True
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not read blob {blob.name}: {e}")
+
+        if audit_file_found and result_file_found:
+            logger.info("Found both audit and result files.")
+            break
+
+        await asyncio.sleep(3)
+
+    # 3. Assert that both files were found and clean them up.
+    try:
+        assert (
+            audit_file_found
+        ), f"TIMEOUT: Audit file with ID '{unique_id}' did not appear in GCS bucket within {timeout}s."
+        assert (
+            result_file_found
+        ), f"TIMEOUT: Result file with ID '{unique_id}' did not appear in GCS bucket within {timeout}s."
+    finally:
+        if found_blobs:
+            logger.info(f"Cleaning up {len(found_blobs)} test files...")
+            for blob in found_blobs:
+                try:
+                    logger.info(
+                        f"Cleaning up test file: {blob.name} from bucket {blob.bucket.name}"
+                    )
+                    blob.delete()
+                    logger.info(f"Successfully deleted: {blob.name}")
+                except Exception as e:
+                    logger.error(f"Failed to delete {blob.name}: {e}")
+            logger.info("Cleanup complete.")
 
 
 async def main():

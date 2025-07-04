@@ -14,16 +14,31 @@ from typing import Dict, Any, AsyncGenerator
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-from models import ConversationFlow, EnrichedNodeExecutionLog
 
 try:
     import pytest_httpx
 except ImportError:
     pytest_httpx = None
 
-# Add evals-service to path for imports BEFORE any other imports
-evals_path = Path(__file__).parent.parent / "evals-service"
-sys.path.insert(0, str(evals_path))
+
+# Setup path and import models
+def _setup_imports():
+    """Setup imports with proper path handling"""
+    evals_path = Path(__file__).parent.parent / "evals-service"
+    sys.path.insert(0, str(evals_path))
+
+    try:
+        from models import ConversationFlow, EnrichedNodeExecutionLog
+
+        return ConversationFlow, EnrichedNodeExecutionLog
+    except ImportError:
+        # Fallback for when PYTHONPATH is not set (IDE/linting)
+        from evals_service.models import ConversationFlow, EnrichedNodeExecutionLog
+
+        return ConversationFlow, EnrichedNodeExecutionLog
+
+
+ConversationFlow, EnrichedNodeExecutionLog = _setup_imports()
 
 load_dotenv()
 

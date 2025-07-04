@@ -17,7 +17,10 @@ from graph.models import (
     ToolMessage,
     RetrievalResult,
 )
-from graph.nodes import RelevanceCheckNode, QueryOrRespondNode
+from graph.nodes import (
+    RelevanceCheckNode,
+    QueryOrRespondNode,
+)
 
 # Add the project root to the path for imports
 project_root = Path(__file__).parent.parent
