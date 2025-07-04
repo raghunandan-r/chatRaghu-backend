@@ -9,10 +9,9 @@ set -e
 # SCENARIO 1: Production (e.g., Railway)
 # The credentials are provided as a multi-line environment variable GCS_KEYFILE_JSON.
 if [ -n "$GCS_KEYFILE_JSON" ]; then
-  # Create the file that GOOGLE_APPLICATION_CREDENTIALS will point to.
-  echo "$GCS_KEYFILE_JSON" > /app/gcs_credentials.json
-  # Set the environment variable for the application to use this newly created file.
-  export GOOGLE_APPLICATION_CREDENTIALS="/app/gcs_credentials.json"
+  CREDS_FILE="/tmp/gcs_credentials.json"   # /tmp is always writable
+  echo "$GCS_KEYFILE_JSON" > "$CREDS_FILE"
+  export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
   echo "GCS credentials configured from GCS_KEYFILE_JSON environment variable."
 
 # SCENARIO 2: Local Development & Testing
