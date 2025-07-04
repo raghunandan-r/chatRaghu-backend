@@ -10,6 +10,7 @@ from config import config
 import backoff
 from opik import track, opik_context
 from models import EnrichedNodeExecutionLog
+import os
 
 project_root = Path(__file__).parent
 env_path = project_root / ".env"
@@ -91,7 +92,7 @@ class GenerateWithPersonaEval(NodeEvaluation):
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=False, project_name="evals-service-dev")
+@track(capture_input=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
 async def evaluate_relevance_check(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RelevanceCheckEval:

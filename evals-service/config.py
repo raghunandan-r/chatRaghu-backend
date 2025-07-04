@@ -14,23 +14,26 @@ class StorageConfig(BaseSettings):
         default="./eval_results", description="Path for evaluation results storage"
     )
 
-    # S3 configuration (for future use)
-    s3_bucket_name: Optional[str] = Field(
-        default=None, description="S3 bucket for storage"
+    # GCS configuration for separate buckets
+    gcs_audit_bucket_name: Optional[str] = Field(
+        default=None, description="GCS bucket for audit data storage"
     )
-    s3_region: Optional[str] = Field(default="us-east-1", description="S3 region")
-    s3_access_key_id: Optional[str] = Field(default=None, description="S3 access key")
-    s3_secret_access_key: Optional[str] = Field(
-        default=None, description="S3 secret key"
+    gcs_eval_results_bucket_name: Optional[str] = Field(
+        default=None, description="GCS bucket for evaluation results storage"
+    )
+
+    # Generic GCS bucket name (for legacy compatibility / simple setups)
+    gcs_bucket_name: Optional[str] = Field(
+        default=None,
+        description="Generic GCS bucket name (if using a single bucket for all data).",
     )
 
     # Storage backend selection
     storage_backend: str = Field(
-        default="local", description="Storage backend: local, s3, or hybrid"
+        default="local", description="Storage backend: local or gcs"
     )
 
     # Batch processing configuration
-
     batch_size: int = Field(
         default=15, description="Number of items to batch before writing"
     )
@@ -46,7 +49,8 @@ class LLMConfig(BaseSettings):
 
     openai_api_key: str = Field(..., description="OpenAI API key")
     openai_model: str = Field(
-        default="gpt-4o", description="OpenAI model to use for evaluation"
+        default="gpt-4o-mini-2024-07-18",
+        description="OpenAI model to use for evaluation",
     )
     openai_max_retries: int = Field(
         default=3, description="Maximum retries for OpenAI API calls"

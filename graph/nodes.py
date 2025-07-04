@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import List, Dict, Optional, Any, AsyncGenerator, Tuple
 from datetime import datetime
 
@@ -24,6 +25,7 @@ from .infrastructure import (
     ConversationHistoryMixin,
 )
 from .retrieval import RetrieveTool, ExampleSelector, client
+
 from utils.logger import logger
 from evaluation_models import (
     ResponseMessage,
@@ -42,7 +44,7 @@ with open(TEMPLATES_PATH, "r") as f:
 class RelevanceCheckNode(Node, ClassificationNodeMixin, ConversationHistoryMixin):
     name: str = "relevance_check"
 
-    @track(capture_input=False)
+    @track(capture_input=True)
     async def process(self, state: MessagesState) -> MessagesState:
         try:
             current_query = next(
@@ -69,10 +71,21 @@ class RelevanceCheckNode(Node, ClassificationNodeMixin, ConversationHistoryMixin
                 },
             )
             openai_messages.append({"role": "user", "content": current_query.content})
+
             response = await client.chat.completions.create(
-                model="gpt-4o-mini", messages=openai_messages, temperature=0.1
+                model="gpt-4.1-nano-2025-04-14",
+                messages=openai_messages,
+                temperature=0.1,
             )
             content = response.choices[0].message.content
+
+            # Extract token usage if available
+            if hasattr(response, "usage") and response.usage:
+                state._node_token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+
             logger.info(
                 "Completed relevance check with history",
                 extra={
@@ -85,16 +98,14 @@ class RelevanceCheckNode(Node, ClassificationNodeMixin, ConversationHistoryMixin
                 name="relevance_check",
                 input={"query": current_query.content, "history": openai_messages},
                 output={"classification": content},
-                metadata={
-                    "system_prompt": PROMPT_TEMPLATES["relevance_check"][
-                        "system_message"
-                    ]
-                },
             )
-            return MessagesState(
+            new_state = MessagesState(
                 messages=[*state.messages, AIMessage(content=content)],
                 thread_id=state.thread_id,
             )
+            if hasattr(state, "_node_token_usage"):
+                new_state._node_token_usage = state._node_token_usage
+            return new_state
         except Exception as e:
             logger.error(
                 "Relevance check failed",
@@ -142,7 +153,7 @@ class QueryOrRespondNode(Node, ClassificationNodeMixin, ConversationHistoryMixin
                 },
             )
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-nano-2025-04-14",
                 messages=openai_messages,
                 tools=[
                     {
@@ -161,6 +172,14 @@ class QueryOrRespondNode(Node, ClassificationNodeMixin, ConversationHistoryMixin
                 tool_choice="auto",
                 stream=False,
             )
+
+            # Extract token usage if available
+            if hasattr(response, "usage") and response.usage:
+                state._node_token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+
             if not hasattr(response, "choices") or not response.choices:
                 logger.error(
                     "Invalid response structure - no choices",
@@ -441,9 +460,17 @@ class FewShotSelectorNode(Node, SystemPromptNodeMixin):
             ]
 
             response = await client.chat.completions.create(
-                model="gpt-4o-mini", messages=messages, temperature=0.1
+                model="gpt-4.1-nano-2025-04-14", messages=messages, temperature=0.1
             )
             content = response.choices[0].message.content
+
+            # Extract token usage if available
+            if hasattr(response, "usage") and response.usage:
+                state._node_token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+
             logger.info(
                 "Completed few-shot selection",
                 extra={
@@ -459,10 +486,13 @@ class FewShotSelectorNode(Node, SystemPromptNodeMixin):
                 metadata={"examples": examples_text},
             )
 
-            return MessagesState(
+            new_state = MessagesState(
                 messages=[*state.messages, AIMessage(content=content)],
                 thread_id=state.thread_id,
             )
+            if hasattr(state, "_node_token_usage"):
+                new_state._node_token_usage = state._node_token_usage
+            return new_state
 
         except Exception as e:
             logger.error(
@@ -614,9 +644,17 @@ class GenerateWithRetrievedContextNode(Node, RetrievalNodeMixin, SystemPromptNod
             ]
 
             response = await client.chat.completions.create(
-                model="gpt-4o-mini", messages=messages, temperature=0.1
+                model="gpt-4.1-nano-2025-04-14", messages=messages, temperature=0.1
             )
             content = response.choices[0].message.content
+
+            # Extract token usage if available
+            if hasattr(response, "usage") and response.usage:
+                state._node_token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+
             logger.info(
                 "Completed context generation",
                 extra={
@@ -633,10 +671,13 @@ class GenerateWithRetrievedContextNode(Node, RetrievalNodeMixin, SystemPromptNod
             )
 
             # Add the generated content to state and return
-            return MessagesState(
+            new_state = MessagesState(
                 messages=[*state.messages, AIMessage(content=content)],
                 thread_id=state.thread_id,
             )
+            if hasattr(state, "_node_token_usage"):
+                new_state._node_token_usage = state._node_token_usage
+            return new_state
 
         except Exception as e:
             logger.error(
@@ -788,12 +829,14 @@ class GenerateWithPersonaNode(StreamingNode, SystemPromptNodeMixin):
                 {"role": "user", "content": user_query},
             ]
 
-            # Collect the complete response
+            # Collect the complete response and track token usage
             complete_response = []
 
             async for chunk in stream_chat_completion(messages, temperature=0.3):
                 if chunk.type == "content" and chunk.content:
                     complete_response.append(chunk.content)
+
+                # Yield all chunks including usage (execute_stream_impl will handle usage)
                 yield chunk
 
             # Log the complete response
@@ -860,7 +903,7 @@ async def stream_chat_completion(
     try:
         # Prepare the API call parameters
         params = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1-nano-2025-04-14",
             "messages": messages,
             "temperature": temperature,
             "stream": True,
@@ -873,8 +916,13 @@ async def stream_chat_completion(
         stream = await client.chat.completions.create(**params)
 
         state = StreamingState()
+        usage_data = None
 
         async for chunk in stream:
+            # Capture usage data if present in the chunk
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage_data = chunk.usage
+
             delta = chunk.choices[0].delta
 
             # Handle function calls
@@ -914,6 +962,16 @@ async def stream_chat_completion(
             if chunk.choices[0].finish_reason:
                 yield StreamingResponse(type="end")
 
+        # Yield usage data at the end if captured
+        if usage_data:
+            yield StreamingResponse(
+                type="usage",
+                usage_stats={
+                    "prompt_tokens": usage_data.prompt_tokens,
+                    "completion_tokens": usage_data.completion_tokens,
+                },
+            )
+
     except Exception as e:
         logger.error(
             "Streaming failed", extra={"action": "streaming_error", "error": str(e)}
@@ -952,29 +1010,37 @@ streaming_graph = StreamingStateGraph(
 
 
 # Define the execute_stream implementation as a standalone function
-@track(capture_output=False)
+@track(capture_input=False)
 async def execute_stream_impl(
-    self, initial_state: MessagesState
+    self, initial_state: MessagesState, run_id: str, turn_index: int
 ) -> AsyncGenerator[Tuple[StreamingResponse, Dict], None]:
     try:
         logger.info(
             "Starting graph execution", extra={"thread_id": initial_state.thread_id}
         )
+
+        # Extract the user query once at the start
+        user_query = next(
+            (
+                msg.content
+                for msg in reversed(initial_state.messages)
+                if isinstance(msg, HumanMessage)
+            ),
+            "",
+        )
+
         opik_context.update_current_trace(
-            name="graph_execution", thread_id=initial_state.thread_id
+            name="graph_execution",
+            thread_id=initial_state.thread_id,
+            input={"user_query": user_query},
         )
 
         # Initialize conversation flow tracking
         conversation_flow = ConversationFlow(
+            run_id=run_id,
             thread_id=initial_state.thread_id,
-            user_query=next(
-                (
-                    msg.content
-                    for msg in reversed(initial_state.messages)
-                    if isinstance(msg, HumanMessage)
-                ),
-                "",
-            ),
+            turn_index=turn_index,
+            user_query=user_query,
         )
 
         current_node = self.entry_point
@@ -1028,15 +1094,48 @@ async def execute_stream_impl(
             if isinstance(node, GenerateWithPersonaNode):
                 # For streaming nodes, we need to collect the complete response
                 complete_content = []
+                first_token_received = False
+                stream_start_time = time.monotonic()  # Use monotonic for intervals
 
                 logger.info(
                     "Starting streaming node processing",
                     extra={"node": current_node, "thread_id": state.thread_id},
                 )
 
+                streaming_usage = None
+
                 async for chunk in node.process_stream(state):
                     if chunk.type == "content" and chunk.content:
                         complete_content.append(chunk.content)
+
+                        # Capture time to first token
+                        if not first_token_received:
+                            ttft_ms = (
+                                datetime.utcnow() - conversation_flow.start_time
+                            ).total_seconds() * 1000
+                            conversation_flow.time_to_first_token_ms = ttft_ms
+                            first_token_received = True
+                            logger.debug(
+                                "First token received",
+                                extra={
+                                    "node": current_node,
+                                    "thread_id": state.thread_id,
+                                    "ttft_ms": ttft_ms,
+                                },
+                            )
+                    elif chunk.type == "usage" and chunk.usage_stats:
+                        # Capture streaming usage data
+                        streaming_usage = chunk.usage_stats
+                        logger.debug(
+                            "Captured streaming usage",
+                            extra={
+                                "node": current_node,
+                                "thread_id": state.thread_id,
+                                "usage": streaming_usage,
+                            },
+                        )
+                        # Don't yield usage chunks to the client
+                        continue
 
                     # Yield each chunk as it comes in
                     yield chunk, {"node": current_node}
@@ -1053,6 +1152,13 @@ async def execute_stream_impl(
                     node_log.output["response"] = full_response
                     node_log.end_time = datetime.utcnow()
 
+                    # Apply streaming usage to node log if captured
+                    if streaming_usage:
+                        node_log.prompt_tokens = streaming_usage.get("prompt_tokens")
+                        node_log.completion_tokens = streaming_usage.get(
+                            "completion_tokens"
+                        )
+
                     logger.info(
                         "Completed streaming node processing",
                         extra={
@@ -1068,6 +1174,22 @@ async def execute_stream_impl(
                     # Queue for evaluation if queue manager is available
                     if self.queue_manager:
                         conversation_flow.end_time = datetime.utcnow()
+                        conversation_flow.latency_ms = (
+                            conversation_flow.end_time - conversation_flow.start_time
+                        ).total_seconds() * 1000
+
+                        # Aggregate token counts from all node executions
+                        conversation_flow.total_prompt_tokens = sum(
+                            log.prompt_tokens
+                            for log in conversation_flow.node_executions
+                            if log.prompt_tokens
+                        )
+                        conversation_flow.total_completion_tokens = sum(
+                            log.completion_tokens
+                            for log in conversation_flow.node_executions
+                            if log.completion_tokens
+                        )
+
                         conversation_flow.node_executions.append(node_log)
 
                         user_query = next(
@@ -1086,24 +1208,41 @@ async def execute_stream_impl(
                         ]
 
                         # Convert RetrievalResult objects to dictionaries for ResponseMessage
+                        # Evaluation service expects all values to be strings
                         converted_docs = []
                         for doc in retrieved_docs:
                             if isinstance(doc, list):
                                 # Handle list of RetrievalResult objects
                                 for result in doc:
                                     if hasattr(result, "model_dump"):
-                                        converted_docs.append(result.model_dump())
+                                        raw_doc = result.model_dump()
+                                        # Convert to string format expected by evaluation service
+                                        converted_doc = {
+                                            "content": str(raw_doc.get("content", "")),
+                                            "score": str(raw_doc.get("score", "")),
+                                            "metadata": str(
+                                                raw_doc.get("metadata", {})
+                                            ),
+                                        }
+                                        converted_docs.append(converted_doc)
                                     else:
                                         converted_docs.append(
-                                            {"content": str(result), "metadata": {}}
+                                            {"content": str(result), "metadata": "{}"}
                                         )
                             elif hasattr(doc, "model_dump"):
                                 # Handle single RetrievalResult object
-                                converted_docs.append(doc.model_dump())
+                                raw_doc = doc.model_dump()
+                                # Convert to string format expected by evaluation service
+                                converted_doc = {
+                                    "content": str(raw_doc.get("content", "")),
+                                    "score": str(raw_doc.get("score", "")),
+                                    "metadata": str(raw_doc.get("metadata", {})),
+                                }
+                                converted_docs.append(converted_doc)
                             else:
                                 # Handle other types
                                 converted_docs.append(
-                                    {"content": str(doc), "metadata": {}}
+                                    {"content": str(doc), "metadata": "{}"}
                                 )
 
                         logger.info(
@@ -1140,6 +1279,17 @@ async def execute_stream_impl(
                     msg.model_dump() for msg in state.messages[-1:]
                 ]
                 node_log.end_time = datetime.utcnow()
+
+                # Capture token usage if the node stored it in state
+                if hasattr(state, "_node_token_usage") and state._node_token_usage:
+                    node_log.prompt_tokens = state._node_token_usage.get(
+                        "prompt_tokens"
+                    )
+                    node_log.completion_tokens = state._node_token_usage.get(
+                        "completion_tokens"
+                    )
+                    # Clean up the temporary token usage data
+                    delattr(state, "_node_token_usage")
 
                 logger.info(
                     "Completed non-streaming node",

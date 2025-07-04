@@ -59,9 +59,10 @@ class StreamingResponse(BaseModel):
     """Represents a chunk of a streaming response"""
 
     content: Optional[str] = None
-    type: Literal["content", "function_call", "end"] = "content"
+    type: Literal["content", "function_call", "end", "usage"] = "content"
     function_name: Optional[str] = None
     function_args: Optional[Dict[str, Any]] = None
+    usage_stats: Optional[Dict[str, Any]] = None  # For token usage in streaming
 
 
 # Tool Models

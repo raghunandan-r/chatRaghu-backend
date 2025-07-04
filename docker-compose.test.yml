@@ -32,12 +32,17 @@ services:
       - ./evals-service:/app
       - ./evals-service/eval_results:/app/eval_results
       - ./evals-service/audit_data:/app/audit_data
+      - ./secrets:/app/secrets:ro  # Mount credentials as read-only
     env_file:
       - .env
     environment:
       # Test-specific overrides
-      - STORAGE_BATCH_SIZE=1 # Write files immediately for tests
-      - STORAGE_WRITE_TIMEOUT_SECONDS=5.0
+      - STORAGE_BATCH_SIZE=5 # Write files immediately for tests
+      - STORAGE_WRITE_TIMEOUT_SECONDS=15.0
+      - STORAGE_STORAGE_BACKEND=gcs
+      - STORAGE_GCS_AUDIT_BUCKET_NAME=bucket-subtle-poet-311614
+      - STORAGE_GCS_EVAL_RESULTS_BUCKET_NAME=bucket-subtle-poet-311614
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/subtle-poet-311614-c74b05c0299f.json
     networks:
       - chatraghu-network
 

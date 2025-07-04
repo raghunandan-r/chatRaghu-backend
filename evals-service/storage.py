@@ -1,6 +1,5 @@
 import asyncio
 import os
-import pandas as pd
 from datetime import datetime
 from typing import List, Protocol, Optional, Dict, Any
 from pathlib import Path
@@ -35,19 +34,16 @@ class LocalStorageBackend:
         self._error_count = 0
 
     async def write_batch(self, data: List[Dict[str, Any]], filename: str) -> bool:
-        """Write batch data to both local parquet and JSON files"""
+        """Write batch data to JSON file"""
         try:
-            # Create base filename without extension
-            base_filename = filename.replace(".parquet", "").replace(".json", "")
-            parquet_path = self.base_path / f"{base_filename}.parquet"
-            json_path = self.base_path / f"{base_filename}.json"
+            # Ensure filename has .json extension
+            if not filename.endswith(".json"):
+                filename = f"{filename}.json"
+
+            json_path = self.base_path / filename
 
             # Ensure directory exists
-            parquet_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write to parquet with compression
-            df = pd.DataFrame(data)
-            df.to_parquet(parquet_path, compression="snappy", index=False)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Write to JSON with pretty formatting
             with open(json_path, "w", encoding="utf-8") as f:
@@ -55,14 +51,10 @@ class LocalStorageBackend:
 
             self._write_count += 1
             logger.info(
-                f"Successfully wrote {len(data)} records to {base_filename}",
+                f"Successfully wrote {len(data)} records to {filename}",
                 extra={
-                    "parquet_path": str(parquet_path),
                     "json_path": str(json_path),
                     "record_count": len(data),
-                    "parquet_size_bytes": parquet_path.stat().st_size
-                    if parquet_path.exists()
-                    else 0,
                     "json_size_bytes": json_path.stat().st_size
                     if json_path.exists()
                     else 0,
@@ -97,23 +89,15 @@ class LocalStorageBackend:
     async def get_metrics(self) -> Dict[str, Any]:
         """Get local storage metrics"""
         try:
-            # Count both parquet and JSON files
-            parquet_files = list(self.base_path.rglob("*.parquet"))
             json_files = list(self.base_path.rglob("*.json"))
-
-            total_parquet_files = len(parquet_files)
             total_json_files = len(json_files)
-            total_parquet_size = sum(f.stat().st_size for f in parquet_files)
             total_json_size = sum(f.stat().st_size for f in json_files)
 
             return {
                 "backend_type": "local",
                 "base_path": str(self.base_path),
-                "total_parquet_files": total_parquet_files,
-                "total_json_files": total_json_files,
-                "total_parquet_size_bytes": total_parquet_size,
-                "total_json_size_bytes": total_json_size,
-                "total_size_bytes": total_parquet_size + total_json_size,
+                "total_files": total_json_files,
+                "total_size_bytes": total_json_size,
                 "write_count": self._write_count,
                 "error_count": self._error_count,
                 "available_space_bytes": self._get_available_space(),
@@ -133,37 +117,84 @@ class LocalStorageBackend:
             return 0
 
 
-class S3StorageBackend:
-    """S3 storage backend (placeholder for future implementation)"""
+class GCSStorageBackend:
+    """Google Cloud Storage backend"""
 
-    def __init__(self, bucket_name: str, region: str, access_key: str, secret_key: str):
-        self.bucket_name = bucket_name
-        self.region = region
-        self.access_key = access_key
-        self.secret_key = secret_key
+    def __init__(self, bucket_name: str):
+        try:
+            from google.cloud import storage
+            from google.api_core.exceptions import GoogleAPICallError
+
+            self.storage_client = storage.Client()
+            self.bucket_name = bucket_name
+            self.bucket = self.storage_client.bucket(self.bucket_name)
+            self.GoogleAPICallError = GoogleAPICallError
+        except ImportError:
+            logger.error(
+                "GCS client libraries not found. Please `pip install google-cloud-storage`"
+            )
+            self.storage_client = None
+
         self._write_count = 0
         self._error_count = 0
-        # TODO: Initialize boto3 client when S3 is needed
 
     async def write_batch(self, data: List[Dict[str, Any]], filename: str) -> bool:
-        """Write batch data to S3 (placeholder)"""
-        logger.warning("S3 storage not yet implemented", extra={"filename": filename})
-        return False
+        """Write batch data to a GCS blob."""
+        if not self.storage_client:
+            self._error_count += 1
+            return False
+
+        try:
+            blob = self.bucket.blob(filename)
+
+            # Use a non-blocking call for the upload
+            await asyncio.to_thread(
+                blob.upload_from_string,
+                data=json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                content_type="application/json",
+            )
+
+            self._write_count += 1
+            logger.info(
+                f"Successfully wrote {len(data)} records to GCS",
+                extra={
+                    "gcs_path": f"gs://{self.bucket_name}/{filename}",
+                    "record_count": len(data),
+                },
+            )
+            return True
+
+        except self.GoogleAPICallError as e:
+            self._error_count += 1
+            logger.error(
+                "Failed to write batch to GCS",
+                extra={"error": str(e), "file_name": filename},
+            )
+            return False
 
     async def health_check(self) -> bool:
-        """Check S3 connectivity (placeholder)"""
-        logger.warning("S3 health check not yet implemented")
-        return False
+        """Check GCS connectivity by checking bucket existence."""
+        if not self.storage_client:
+            return False
+        try:
+            # Check if bucket exists and we have permissions
+            return (
+                await asyncio.to_thread(
+                    self.storage_client.lookup_bucket, self.bucket_name
+                )
+                is not None
+            )
+        except self.GoogleAPICallError as e:
+            logger.error("GCS health check failed", extra={"error": str(e)})
+            return False
 
     async def get_metrics(self) -> Dict[str, Any]:
-        """Get S3 metrics (placeholder)"""
+        """Get GCS storage metrics."""
         return {
-            "backend_type": "s3",
+            "backend_type": "gcs",
             "bucket_name": self.bucket_name,
-            "region": self.region,
             "write_count": self._write_count,
             "error_count": self._error_count,
-            "status": "not_implemented",
         }
 
 
@@ -178,12 +209,14 @@ class StorageManager:
         queue: asyncio.Queue,
         storage_backend: StorageBackend,
         file_prefix: str,
+        path_prefix: Optional[str] = None,
         batch_size: int = None,
         write_timeout: float = None,
     ):
         self.queue = queue
         self.storage_backend = storage_backend
         self.file_prefix = file_prefix
+        self.path_prefix = path_prefix
         self.batch_size = batch_size or config.storage.batch_size
         self.write_timeout = write_timeout or config.storage.write_timeout_seconds
         self._worker_task: Optional[asyncio.Task] = None
@@ -267,11 +300,46 @@ class StorageManager:
         return batch
 
     async def _write_batch(self, items: List[Dict[str, Any]]) -> bool:
-        """Write a batch of items to storage in both Parquet and JSON formats."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"{self.file_prefix}_{timestamp}"
+        """Write a batch of items to storage with a partitioned path."""
+        if not items:
+            return True
 
-        return await self.storage_backend.write_batch(items, filename)
+        # --- New Partitioning Logic ---
+        # Extract run_id from the first item, handling different data structures
+        first_item = items[0]
+        run_id = "unknown_run_id"  # Default fallback
+
+        # Try to extract run_id from different possible structures
+        if "run_id" in first_item:
+            # Direct run_id field (for EvaluationResult objects)
+            run_id = first_item["run_id"]
+        elif "conversation_flow" in first_item and first_item["conversation_flow"]:
+            # Nested in conversation_flow (for EvaluationRequest objects)
+            conversation_flow = first_item["conversation_flow"]
+            if isinstance(conversation_flow, dict) and "run_id" in conversation_flow:
+                run_id = conversation_flow["run_id"]
+
+        # Ensure we have a valid run_id, fallback if None or empty
+        if not run_id or run_id is None:
+            run_id = "unknown_run_id"
+
+        # Get the current date for the partition
+        utc_now = datetime.utcnow()
+        date_str = utc_now.strftime("%Y-%m-%d")
+        timestamp = utc_now.strftime("%Y%m%d_%H%M%S_%f")
+
+        # Construct the Hive-style partitioned path
+        partition_path = f"date={date_str}/run_id={run_id}"
+        filename = f"{self.file_prefix}_{timestamp}.json"
+
+        # Prepend the path prefix if it exists to create a top-level folder
+        if self.path_prefix:
+            full_path = f"{self.path_prefix}/{partition_path}/{filename}"
+        else:
+            full_path = f"{partition_path}/{filename}"
+        # --- End New Logic ---
+
+        return await self.storage_backend.write_batch(items, full_path)
 
     async def start(self):
         """Starts the background storage worker."""
@@ -338,13 +406,8 @@ def create_storage_backend() -> StorageBackend:
     """Factory function to create appropriate storage backend based on configuration."""
     storage_config = config.storage
 
-    if storage_config.storage_backend == "s3" and storage_config.s3_bucket_name:
-        return S3StorageBackend(
-            bucket_name=storage_config.s3_bucket_name,
-            region=storage_config.s3_region,
-            access_key=storage_config.s3_access_key_id,
-            secret_key=storage_config.s3_secret_access_key,
-        )
+    if storage_config.storage_backend == "gcs" and storage_config.gcs_bucket_name:
+        return GCSStorageBackend(bucket_name=storage_config.gcs_bucket_name)
     else:
         # Default to local storage
         return LocalStorageBackend(storage_config.audit_data_path)

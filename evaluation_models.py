@@ -48,12 +48,18 @@ class EnrichedNodeExecutionLog(BaseModel):
     message_source: Literal[
         "human", "ai"
     ] = "ai"  # Track if message is human or AI generated
+    # New fields for token tracking
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
 
 
 class ConversationFlow(BaseModel):
     """Tracks the complete flow of a conversation through the graph"""
 
+    # New fields for batching and ordering
+    run_id: Optional[str] = None  # For batching evaluations
     thread_id: str
+    turn_index: int = 0  # To order turns within a thread
     user_query: str
     start_time: datetime = Field(default_factory=datetime.utcnow)
     end_time: Optional[datetime] = None
@@ -61,6 +67,12 @@ class ConversationFlow(BaseModel):
         default_factory=list
     )  # Updated to use EnrichedNodeExecutionLog
     final_response: Optional[str] = None
+
+    # New fields for timing and token tracking
+    latency_ms: Optional[float] = None
+    time_to_first_token_ms: Optional[float] = None
+    total_prompt_tokens: Optional[int] = None
+    total_completion_tokens: Optional[int] = None
 
 
 class ResponseMessage(BaseModel):

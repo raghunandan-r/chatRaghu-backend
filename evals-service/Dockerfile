@@ -25,6 +25,10 @@ USER appuser
 # This will be mounted over by docker-compose for development
 COPY --chown=appuser:appuser . .
 
+# Copy the entrypoint script and make it executable
+COPY --chown=appuser:appuser entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
 # Expose the port the app runs on
 EXPOSE 8001
 
@@ -32,5 +36,8 @@ EXPOSE 8001
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Command to run the application
+# Set the entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
+
+# The CMD will be passed to the entrypoint
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

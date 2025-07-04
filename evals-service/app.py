@@ -14,7 +14,7 @@ from models import (
 )
 from queue_manager import DualQueueManager
 from run_evals import AsyncEvaluator
-from storage import StorageManager, LocalStorageBackend
+from storage import StorageManager, LocalStorageBackend, GCSStorageBackend
 from utils.logger import logger
 from config import config
 
@@ -33,6 +33,34 @@ async def lifespan(app: FastAPI):
     app.state.queue_manager = DualQueueManager()
 
     # Create storage backends
+    # Determine storage backend based on configuration (local vs GCS)
+    if (
+        config.storage.storage_backend.lower() == "gcs"
+        and config.storage.gcs_audit_bucket_name
+        and config.storage.gcs_eval_results_bucket_name
+    ):
+        logger.info(
+            "Using separate GCS buckets for audit and result storage",
+            extra={
+                "audit_bucket": config.storage.gcs_audit_bucket_name,
+                "results_bucket": config.storage.gcs_eval_results_bucket_name,
+            },
+        )
+
+        # Create separate backend instances for true isolation
+        audit_backend = GCSStorageBackend(
+            bucket_name=config.storage.gcs_audit_bucket_name
+        )
+        results_backend = GCSStorageBackend(
+            bucket_name=config.storage.gcs_eval_results_bucket_name
+        )
+    else:
+        # Fallback to local storage (default behaviour)
+        logger.info(
+            "Using LocalStorageBackend for audit and result storage",
+            extra={"backend_type": "LocalStorageBackend"},
+        )
+
     audit_backend = LocalStorageBackend(config.storage.audit_data_path)
     results_backend = LocalStorageBackend(config.storage.eval_results_path)
 
@@ -45,6 +73,7 @@ async def lifespan(app: FastAPI):
         queue=audit_storage_queue,
         storage_backend=audit_backend,
         file_prefix="audit_request",
+        path_prefix="audit_data",
         batch_size=config.storage.batch_size,
         write_timeout=config.storage.write_timeout_seconds,
     )
@@ -53,6 +82,7 @@ async def lifespan(app: FastAPI):
         queue=results_storage_queue,
         storage_backend=results_backend,
         file_prefix="eval_result",
+        path_prefix="eval_results",
         batch_size=config.storage.batch_size,
         write_timeout=config.storage.write_timeout_seconds,
     )

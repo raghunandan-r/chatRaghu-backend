@@ -354,7 +354,16 @@ async def chat(
         new_message = HumanMessage(content=chat_request.messages[0].content)
         initial_state = MessagesState.from_thread(thread_id, new_message)
 
-        stream_gen = streaming_graph.execute_stream(initial_state)
+        now = datetime.now()
+        run_id = f"run_{now.strftime('%Y%m%d')}_{now.hour // 6:02d}"
+        turn_index = (
+            len(
+                [msg for msg in initial_state.messages if isinstance(msg, HumanMessage)]
+            )
+            - 1
+        )  # -1 because we just added one
+
+        stream_gen = streaming_graph.execute_stream(initial_state, run_id, turn_index)
 
         return FastAPIStreamingResponse(
             content=stream_chunks(stream_gen, thread_id, time.time(), request),
