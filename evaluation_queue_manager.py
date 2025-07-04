@@ -73,11 +73,13 @@ class EvaluationQueueManager:
     async def _worker(self):
         """Background worker to process evaluation requests"""
         while True:
+            message = None
             try:
                 # Wait for the next item; allow the task to be cancelled cleanly
                 message = await self.queue.get()
             except asyncio.CancelledError:
                 # Task is being cancelled (e.g., on shutdown). Leave the loop gracefully.
+                logger.info("Evaluation queue worker received cancellation signal")
                 break
 
             try:
@@ -85,8 +87,9 @@ class EvaluationQueueManager:
             except Exception as e:
                 logger.error("Worker error", extra={"error": str(e)})
             finally:
-                # Mark the task done **only** for the retrieved item
-                self.queue.task_done()
+                # Mark the task done **only** if we actually retrieved an item
+                if message is not None:
+                    self.queue.task_done()
 
     async def start(self, evaluator=None):
         """Start the evaluation queue worker"""

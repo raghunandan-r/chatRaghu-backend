@@ -269,6 +269,7 @@ class StorageManager:
     async def _collect_batch(self) -> List[Dict[str, Any]]:
         """Collects a batch of items from the queue with a timeout."""
         batch = []
+        first_item = None
         try:
             # Wait for the first item with timeout
             first_item = await asyncio.wait_for(
@@ -296,6 +297,11 @@ class StorageManager:
             pass  # No items arrived within the timeout
         except asyncio.QueueEmpty:
             pass  # The queue is empty
+        except asyncio.CancelledError:
+            # If we were cancelled after getting the first item, mark it as done
+            if first_item is not None:
+                self.queue.task_done()
+            raise  # Re-raise the cancellation
 
         return batch
 
