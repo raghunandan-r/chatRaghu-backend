@@ -620,6 +620,9 @@ async def test_gcs_only_end_to_end_write_and_verify(
             audit_blobs = list(
                 audit_bucket.list_blobs(prefix=f"audit_data/date={date_str}")
             )
+            logger.debug(
+                f"Found {len(audit_blobs)} audit blobs with prefix audit_data/date={date_str}"
+            )
             for blob in audit_blobs:
                 if "audit_request" not in blob.name:
                     continue
@@ -632,6 +635,10 @@ async def test_gcs_only_end_to_end_write_and_verify(
                         found_blobs.append(blob)
                         audit_file_found = True
                         break
+                    else:
+                        logger.debug(
+                            f"Audit blob {blob.name} does not contain unique_id {unique_id}"
+                        )
                 except Exception as e:
                     logger.warning(f"Could not read blob {blob.name}: {e}")
 
@@ -639,6 +646,9 @@ async def test_gcs_only_end_to_end_write_and_verify(
         if not result_file_found:
             results_blobs = list(
                 results_bucket.list_blobs(prefix=f"eval_results/date={date_str}")
+            )
+            logger.debug(
+                f"Found {len(results_blobs)} result blobs with prefix eval_results/date={date_str}"
             )
             for blob in results_blobs:
                 if "eval_result" not in blob.name:
@@ -652,6 +662,10 @@ async def test_gcs_only_end_to_end_write_and_verify(
                         found_blobs.append(blob)
                         result_file_found = True
                         break
+                    else:
+                        logger.debug(
+                            f"Result blob {blob.name} does not contain unique_id {unique_id}"
+                        )
                 except Exception as e:
                     logger.warning(f"Could not read blob {blob.name}: {e}")
 
@@ -672,18 +686,39 @@ async def test_gcs_only_end_to_end_write_and_verify(
     finally:
         if found_blobs:
             logger.info(f"Cleaning up {len(found_blobs)} test files...")
+            cleanup_failures = []
             for blob in found_blobs:
                 try:
                     logger.info(
-                        f"Cleaning up test file: {blob.name} from bucket {blob.bucket.name}"
+                        f"Attempting to delete: {blob.name} from bucket {blob.bucket.name}"
                     )
                     blob.delete()
+                    # Wait a moment and check if it still exists
+                    await asyncio.sleep(1)
                     if blob.exists():
-                        pytest.fail(f"blob {blob.name} could not be deleted")
-                    logger.info(f"Successfully deleted: {blob.name}")
+                        error_msg = (
+                            f"Blob {blob.name} still exists after deletion attempt"
+                        )
+                        logger.error(error_msg)
+                        cleanup_failures.append(error_msg)
+                    else:
+                        logger.info(f"Successfully deleted: {blob.name}")
                 except Exception as e:
-                    logger.error(f"Failed to delete {blob.name}: {e}")
-            logger.info("Cleanup complete.")
+                    error_msg = f"Exception deleting {blob.name}: {e}"
+                    logger.error(error_msg)
+                    cleanup_failures.append(error_msg)
+
+            if cleanup_failures:
+                pytest.fail(
+                    f"Cleanup failed for {len(cleanup_failures)} files:\n"
+                    + "\n".join(cleanup_failures)
+                )
+            else:
+                logger.info("Cleanup completed successfully for all files.")
+        else:
+            logger.warning(
+                "No blobs found to clean up - this might indicate a problem with file detection"
+            )
 
 
 async def main():
