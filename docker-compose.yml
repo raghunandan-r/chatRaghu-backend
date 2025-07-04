@@ -17,7 +17,7 @@ services:
     environment:
       - EVALUATION_SERVICE_URL=http://evaluation-service:8001
       - EVALUATION_SERVICE_TIMEOUT=30
-      - MOCK_EVAL_CLIENT=true
+      - MOCK_EVAL_CLIENT=false
     depends_on:
       - evaluation-service
     networks:
