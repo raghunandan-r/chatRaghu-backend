@@ -7,21 +7,23 @@ set -e
 # This script handles two scenarios for providing GCS credentials to the application.
 
 # SCENARIO 1: Production (e.g., Railway)
-# The credentials are provided as a multi-line environment variable GCS_KEYFILE_JSON.
-if [ -n "$GCS_KEYFILE_JSON" ]; then
-  CREDS_FILE="/tmp/gcs_credentials.json"   # /tmp is always writable
-  echo "$GCS_KEYFILE_JSON" > "$CREDS_FILE"
+# Prefer base64-encoded creds if provided to avoid JSON parsing issues with multiline env vars
+CREDS_FILE="/tmp/gcs_credentials.json"
+if [ -n "$GCS_KEYFILE_JSON_BASE64" ]; then
+  echo "Decoding GCS credentials from GCS_KEYFILE_JSON_BASE64"
+  echo "$GCS_KEYFILE_JSON_BASE64" | base64 -d > "$CREDS_FILE"
+  export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
+  echo "GCS credentials configured from base64 env var."
+elif [ -n "$GCS_KEYFILE_JSON" ]; then
+  # Write plain JSON, preserving all characters exactly
+  printf '%s' "$GCS_KEYFILE_JSON" > "$CREDS_FILE"
   export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
   echo "GCS credentials configured from GCS_KEYFILE_JSON environment variable."
-
 # SCENARIO 2: Local Development & Testing
-# The credentials file is mounted via a Docker volume. GOOGLE_APPLICATION_CREDENTIALS
-# is already set in docker-compose.test.yml to point to the mounted file.
 else
-  echo "GCS_KEYFILE_JSON not set. Assuming credentials are provided via volume mount."
+  echo "No in-env GCS credentials provided; assuming credentials are mounted via volume."
 fi
 
 # --- Execution ---
 # Execute the original command passed to the container (e.g., uvicorn).
-# The application will now find the credentials using the correct method.
 exec "$@"
