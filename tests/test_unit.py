@@ -37,7 +37,7 @@ if evals_service_path not in sys.path:
 
 # Try to import the app, skip if modules are not available
 try:
-    from evals_service.app import app
+    from app import app
 
     EVALS_SERVICE_AVAILABLE = True
 except ImportError:
