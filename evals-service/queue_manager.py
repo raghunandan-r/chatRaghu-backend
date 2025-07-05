@@ -91,36 +91,45 @@ class DualQueueManager:
         logger.info("Started audit queue worker")
 
         while True:
+            request = None
             try:
                 request = await self.audit_queue.get()
-                await self._process_audit_request(request)
-                self._audit_processed += 1
             except asyncio.CancelledError:
                 logger.info("Audit worker cancelled")
                 break
+
+            try:
+                await self._process_audit_request(request)
+                self._audit_processed += 1
             except Exception as e:
                 self._audit_errors += 1
                 logger.error("Error in audit worker", extra={"error": str(e)})
             finally:
-                self.audit_queue.task_done()
+                if request is not None:
+                    self.audit_queue.task_done()
 
     async def _eval_worker(self, evaluator):
         """Worker for processing evaluation requests."""
         logger.info("Started evaluation queue worker")
 
         while True:
+            message = None
             try:
                 message = await self.eval_queue.get()
-                await self._process_evaluation_request(message, evaluator)
-                self._eval_processed += 1
             except asyncio.CancelledError:
                 logger.info("Evaluation worker cancelled")
                 break
+
+            try:
+                await self._process_evaluation_request(message, evaluator)
+                self._eval_processed += 1
+
             except Exception as e:
                 self._eval_errors += 1
                 logger.error("Error in evaluation worker", extra={"error": str(e)})
             finally:
-                self.eval_queue.task_done()
+                if message is not None:
+                    self.eval_queue.task_done()
 
     async def _process_audit_request(self, request: EvaluationRequest):
         """Process an audit request and store it."""
