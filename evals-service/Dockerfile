@@ -40,4 +40,4 @@ ENV PYTHONPATH=/app
 ENTRYPOINT ["./entrypoint.sh"]
 
 # The CMD will be passed to the entrypoint
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "uvicorn app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8001}"]
