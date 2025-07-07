@@ -286,6 +286,30 @@ async def test_ruthless_end_to_end_flow(
     audit_path = Path("evals-service/audit_data")
     results_path = Path("evals-service/eval_results")
 
+    # --- Fast-fail check: ensure evals-service actually instantiated local backends ---
+    metrics_resp = await http_client.get(f"{EVALUATION_SERVICE_URL}/metrics")
+    metrics_resp.raise_for_status()
+    metrics_json = metrics_resp.json()
+
+    try:
+        audit_backend_type = metrics_json["components"]["audit_storage"][
+            "backend_metrics"
+        ]["backend_type"]
+        result_backend_type = metrics_json["components"]["results_storage"][
+            "backend_metrics"
+        ]["backend_type"]
+    except KeyError as e:
+        pytest.fail(
+            f"Unexpected metrics schema – missing key {e}. Full payload: {metrics_json}"
+        )
+
+    if audit_backend_type != "local" or result_backend_type != "local":
+        pytest.fail(
+            "Evaluation service is not using local backends as expected: "
+            f"audit_backend={audit_backend_type}, result_backend={result_backend_type}. "
+            "Check STORAGE_* env vars and service startup logs."
+        )
+
     # 1. Clean up old files
     logger.info("RUTHLESS_TEST_CLEANUP: Deleting old test files...")
     # Clean up audit data
@@ -494,10 +518,21 @@ async def test_ruthless_end_to_end_flow(
                 # Handle both list and dict formats for result data
                 if isinstance(results_data, list) and len(results_data) > 0:
                     assert results_data[0]["thread_id"] == thread_id
-                    assert results_data[0]["metadata"]["overall_success"] is True
+                    assert (
+                        "metadata" in results_data[0]
+                    ), f"Missing metadata in results data for thread {thread_id}"
+                    assert (
+                        "overall_success" in results_data[0]["metadata"]
+                    ), f"Missing overall_success in metadata for thread {thread_id}"
                 else:
                     assert results_data["thread_id"] == thread_id
-                    assert results_data["metadata"]["overall_success"] is True
+                    assert (
+                        "metadata" in results_data
+                    ), f"Missing metadata in results data for thread {thread_id}"
+                    assert (
+                        "overall_success" in results_data["metadata"]
+                    ), f"Missing overall_success in metadata for thread {thread_id}"
+
             logger.info(f"✓ Result file content verified for thread {thread_id}.")
 
         logger.info(

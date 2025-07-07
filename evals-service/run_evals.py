@@ -7,11 +7,7 @@ import time
 from datetime import datetime
 from models import EvaluationResult, RetryConfig, ConversationFlow
 from evaluators import (
-    evaluate_relevance_check,
-    # evaluate_query_or_respond,
-    # evaluate_few_shot_selector,
-    # evaluate_generate_with_context,
-    # evaluate_generate_with_persona,
+    EVALUATOR_REGISTRY,
 )
 from config import config
 import traceback
@@ -98,36 +94,99 @@ class AsyncEvaluator:
             evaluations = {}
             eval_token_usage = {"prompt": 0, "completion": 0}
 
-            # We are only evaluating the 'relevance_check' node for now.
+            # Evaluate relevant nodes in the conversation flow using the registry
             for node_execution in conversation_flow.node_executions:
-                if node_execution.node_name == "relevance_check":
-                    eval_result = await evaluate_relevance_check(
-                        node_execution=node_execution, user_query=query
-                    )
-                    evaluations[node_execution.node_name] = eval_result.model_dump()
+                node_name = node_execution.node_name
+                evaluator_functions = EVALUATOR_REGISTRY.get(node_name, [])
 
-                    # TODO: When evaluators are updated to return token usage, capture it here
-                    # eval_token_usage["prompt"] += eval_result.prompt_tokens or 0
-                    # eval_token_usage["completion"] += eval_result.completion_tokens or 0
+                if not evaluator_functions:
+                    logger.info(
+                        f"EVALUATOR_NODE_SKIPPED: No evaluators registered for node '{node_name}' for thread_id={thread_id}",
+                        extra={"thread_id": thread_id, "node_name": node_name},
+                    )
+                    continue
 
-                    logger.info(
-                        f"EVALUATOR_NODE_PROCESSED: Processed node '{node_execution.node_name}' for thread_id={thread_id}",
-                        extra={
-                            "thread_id": thread_id,
-                            "node_name": node_execution.node_name,
-                        },
-                    )
-                else:
-                    logger.info(
-                        f"EVALUATOR_NODE_SKIPPED: Skipping node '{node_execution.node_name}' for thread_id={thread_id}",
-                        extra={
-                            "thread_id": thread_id,
-                            "node_name": node_execution.node_name,
-                        },
-                    )
+                node_eval_results = {}
+                for evaluator_func in evaluator_functions:
+                    eval_name = evaluator_func.__name__
+                    try:
+                        eval_result = await evaluator_func(
+                            node_execution=node_execution, user_query=query
+                        )
+
+                        # Store this specific evaluation's result
+                        node_eval_results[eval_name] = eval_result.model_dump()
+
+                        # Centrally aggregate token usage
+                        eval_token_usage["prompt"] += eval_result.prompt_tokens or 0
+                        eval_token_usage["completion"] += (
+                            eval_result.completion_tokens or 0
+                        )
+
+                        logger.info(
+                            f"EVALUATOR_SUB_EVAL_PROCESSED: Processed evaluator '{eval_name}' for node '{node_name}'",
+                            extra={
+                                "thread_id": thread_id,
+                                "node_name": node_name,
+                                "evaluator": eval_name,
+                            },
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"EVALUATOR_SUB_EVAL_FAILED: Evaluator '{eval_name}' failed for node '{node_name}'",
+                            extra={
+                                "thread_id": thread_id,
+                                "node_name": node_name,
+                                "evaluator": eval_name,
+                                "error": str(e),
+                                "traceback": traceback.format_exc(),
+                            },
+                        )
+                        # Record the failure for this specific sub-evaluation
+                        node_eval_results[eval_name] = {
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "status": "failed",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                        # Continue to the next evaluator for this node
+                        continue
+
+                # Add the collected results for the node to the main evaluations dict
+                if node_eval_results:
+                    evaluations[node_name] = node_eval_results
 
             # Calculate evaluation latency
             eval_latency_ms = (time.monotonic() - eval_start_time) * 1000
+
+            # Calculate overall success based on all evaluation results
+            def check_all_evaluations_success(evaluations_dict):
+                """Check if all evaluation results have overall_success=True"""
+                if not evaluations_dict:
+                    return False
+
+                for node_name, node_results in evaluations_dict.items():
+                    # Handle nested structure where node_results is a dict of evaluator results
+                    if isinstance(node_results, dict):
+                        for evaluator_name, evaluator_result in node_results.items():
+                            # Skip failed evaluations (they have error info instead of overall_success)
+                            if (
+                                "error" in evaluator_result
+                                or "status" in evaluator_result
+                            ):
+                                continue
+                            # Check if overall_success is False
+                            if evaluator_result.get("overall_success") is False:
+                                return False
+                    else:
+                        # Handle flat structure (fallback)
+                        if node_results.get("overall_success") is False:
+                            return False
+
+                return True
+
+            overall_success = check_all_evaluations_success(evaluations)
 
             logger.info(
                 f"EVALUATOR_SUCCESS: Evaluation completed for thread_id={thread_id}",
@@ -135,6 +194,11 @@ class AsyncEvaluator:
                     "thread_id": thread_id,
                     "result": evaluations,
                     "eval_latency_ms": eval_latency_ms,
+                    "eval_prompt_tokens": eval_token_usage["prompt"],
+                    "eval_completion_tokens": eval_token_usage["completion"],
+                    "total_eval_tokens": eval_token_usage["prompt"]
+                    + eval_token_usage["completion"],
+                    "overall_success": overall_success,
                 },
             )
 
@@ -162,7 +226,10 @@ class AsyncEvaluator:
                 # The actual evaluation results
                 evaluations=evaluations,
                 # Overall metadata
-                metadata={"overall_success": bool(evaluations)},
+                metadata={
+                    "overall_success": overall_success,
+                    "evaluation_token_usage": eval_token_usage,
+                },
             )
 
         except Exception as e:
@@ -209,7 +276,11 @@ class AsyncEvaluator:
                 # The actual evaluation results
                 evaluations={},
                 # Overall metadata
-                metadata={"overall_success": False, "error": str(e)},
+                metadata={
+                    "overall_success": False,
+                    "error": str(e),
+                    "evaluation_token_usage": {"prompt": 0, "completion": 0},
+                },
             )
 
     async def health_check(self) -> dict:

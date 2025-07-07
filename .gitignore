@@ -15,6 +15,7 @@ plan_misc/*
 *.env
 .env.*
 !.env.example
+docker-compose.test.yml
 
 *.pyc
 .python-version

@@ -148,8 +148,6 @@ class QueryOrRespondNode(Node, ClassificationNodeMixin, ConversationHistoryMixin
                 extra={
                     "node": self.name,
                     "thread_id": state.thread_id,
-                    "message_count": len(openai_messages),
-                    "original_count": len(state.messages),
                 },
             )
             response = await client.chat.completions.create(
@@ -385,10 +383,6 @@ class FewShotSelectorNode(Node, SystemPromptNodeMixin):
             self.example_selector = ExampleSelector(examples=examples)
             await self.example_selector.initialize_examples(examples)
 
-    def _get_system_prompt(self, state: MessagesState) -> Optional[str]:
-        """Return the system prompt used for few-shot selection"""
-        return PROMPT_TEMPLATES["few_shot_selector"]["system_message"]
-
     @track(capture_input=False)
     async def process(self, state: MessagesState) -> MessagesState:
         try:
@@ -508,42 +502,6 @@ class FewShotSelectorNode(Node, SystemPromptNodeMixin):
 
 class GenerateWithRetrievedContextNode(Node, RetrievalNodeMixin, SystemPromptNodeMixin):
     name: str = "generate_with_retrieved_context"
-
-    def _get_system_prompt(self, state: MessagesState) -> Optional[str]:
-        """Return the system prompt used for context generation"""
-        user_query = next(
-            (
-                msg.content
-                for msg in reversed(state.messages)
-                if isinstance(msg, HumanMessage)
-            ),
-            "",
-        )
-        current_date = datetime.now().strftime("%B %d, %Y")
-
-        # Process tool message outputs for docs content
-        tool_messages = [msg for msg in state.messages if isinstance(msg, ToolMessage)]
-        docs_content_parts = []
-        for msg in tool_messages:
-            if msg.tool_name == "retrieve" and msg.output:
-                # Handle RetrievalResult objects
-                if isinstance(msg.output, list) and all(
-                    isinstance(item, RetrievalResult) for item in msg.output
-                ):
-                    for result in msg.output:
-                        docs_content_parts.append(
-                            f"Content: {result.content} (Score: {result.score:.2f})"
-                        )
-                # Handle the case where output is already a string
-                elif isinstance(msg.output, str):
-                    docs_content_parts.append(msg.output)
-
-        docs_content = "\n\n".join(docs_content_parts)
-        return PROMPT_TEMPLATES["generate_with_retrieved_context"][
-            "system_message"
-        ].format(
-            current_date_str=current_date, query=user_query, docs_content=docs_content
-        )
 
     async def collect_metadata(
         self, state: MessagesState, start_time: datetime, end_time: datetime
@@ -695,44 +653,6 @@ class GenerateWithRetrievedContextNode(Node, RetrievalNodeMixin, SystemPromptNod
 class GenerateWithPersonaNode(StreamingNode, SystemPromptNodeMixin):
     name: str = "generate_with_persona"
 
-    def _get_system_prompt(self, state: MessagesState) -> Optional[str]:
-        """Return the system prompt used for persona generation"""
-
-        last_ai_message = next(
-            (
-                msg.content
-                for msg in reversed(state.messages)
-                if isinstance(msg, AIMessage)
-            ),
-            None,
-        )
-
-        # Get the category from the few_shot_selector output
-        category = "UNKNOWN"
-        for msg in reversed(state.messages):
-            if isinstance(msg, AIMessage) and any(
-                cat in msg.content
-                for cat in ["Category: JEST", "Category: HACK", "Category: OFFICIAL"]
-            ):
-                category = next(
-                    (
-                        cat
-                        for cat in ["JEST", "HACK:MANIPULATION", "OFFICIAL"]
-                        if f"Category: {cat}" in msg.content
-                    ),
-                    "UNKNOWN",
-                )
-                break
-
-        # Format the system message
-        return PROMPT_TEMPLATES["generate_with_persona"]["system_message"].format(
-            last_ai_message=last_ai_message,
-            category=category,
-            suggest_email="Suggest 'you seem to be asking too many questions, why dont you reach out directly via email @ raghunandan092@gmail.com'"
-            if len([m for m in state.messages if isinstance(m, HumanMessage)]) > 5
-            else "",
-        )
-
     async def collect_metadata(
         self, state: MessagesState, start_time: datetime, end_time: datetime
     ) -> Dict[str, Any]:
@@ -765,7 +685,7 @@ class GenerateWithPersonaNode(StreamingNode, SystemPromptNodeMixin):
                 sum(
                     1 for message in state.messages if isinstance(message, HumanMessage)
                 )
-                > 5
+                > 4
             )
             last_ai_message = next(
                 (
@@ -1010,7 +930,7 @@ streaming_graph = StreamingStateGraph(
 
 
 # Define the execute_stream implementation as a standalone function
-@track(capture_input=False)
+@track(capture_input=False, capture_output=False)
 async def execute_stream_impl(
     self, initial_state: MessagesState, run_id: str, turn_index: int
 ) -> AsyncGenerator[Tuple[StreamingResponse, Dict], None]:
