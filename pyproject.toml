@@ -1,0 +1,12 @@
+[tool.ruff]
+# Exclude problematic paths during import system recovery
+extend-exclude = [
+    "__pycache__",
+    ".pytest_cache",
+]
+
+# Per-file ignores for test files
+[tool.ruff.per-file-ignores]
+"tests/*.py" = ["F401", "F811"]  # Allow unused imports and redefinitions in test files
+"tests/conftest.py" = ["F401", "E402"]  # Allow import issues in conftest during recovery
+"evals_service/__init__.py" = ["E402"]  # Allow import order issues in shim setup

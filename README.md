@@ -20,9 +20,9 @@ The application is split into two main services:
 ### Evaluation Service (`evaluation-service`)
 - Separate FastAPI service for evaluation processing
 - Asynchronous evaluation queue management
-- Multiple evaluation types (relevance, persona, etc.)
+- **NEW**: Modular and extensible evaluator architecture in the `evals-service/evaluators` package, allowing multiple evaluations per graph node (relevance, persona, etc.).
 - Results storage and metrics
-- **NEW**: Structured LLM validation using Instructor and Pydantic
+- Structured LLM validation using Instructor and Pydantic
 
 ## Quick Start
 

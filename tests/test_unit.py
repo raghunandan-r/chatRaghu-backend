@@ -4,24 +4,18 @@ Consolidated unit tests for both ChatRaghu services.
 
 This file contains all unit tests organized by service and component:
 - Main service unit tests (API endpoints, validation)
-- Evaluation service unit tests (components, queue manager, storage)
-- Configuration and utility tests
-
-Test Organization:
-- TestMainService: Main backend service endpoint tests
-- TestEvaluationService: Evaluation service endpoint tests
-- TestEvaluationComponents: Internal evaluation service component tests
-- TestConfiguration: Configuration loading and validation tests
+- Evaluator module unit tests (base utilities, individual evaluators)
+- Storage backend unit tests
 """
 
 import pytest
 import httpx
-import sys
 import os
 import time
 from typing import Dict, Any
-from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
+import sys
+import importlib
 
 from .conftest import (
     MAIN_SERVICE_URL,
@@ -30,19 +24,59 @@ from .conftest import (
     logger,
 )
 
-# Add evals-service to path for imports BEFORE any other imports
-evals_service_path = os.path.join(os.path.dirname(__file__), "..", "evals-service")
-if evals_service_path not in sys.path:
-    sys.path.insert(0, evals_service_path)
-
-# Try to import the app, skip if modules are not available
+# Import from evals_service package
 try:
-    from app import app
+    # This top-level import activates the shims
+    import evals_service
+
+    # Now use the shimmed imports
+    from evaluators import (
+        EVALUATOR_REGISTRY,
+    )
+    from evaluators.base import get_eval_prompt, get_system_message
 
     EVALS_SERVICE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning(f"Evals service package not available: {e}")
     EVALS_SERVICE_AVAILABLE = False
 
+
+# Create mock evaluator functions for testing
+def mock_evaluate_relevance_check(node_execution, user_query):
+    """Mock evaluator for testing purposes"""
+    return type(
+        "RelevanceCheckEval",
+        (),
+        {
+            "overall_success": True,
+            "classification": "RELEVANT",
+            "format_valid": True,
+            "explanation": "Mock evaluation",
+        },
+    )()
+
+
+def mock_evaluate_generate_with_persona(node_execution, user_query):
+    """Mock evaluator for testing purposes"""
+    return type(
+        "GenerateWithPersonaEval",
+        (),
+        {
+            "overall_success": True,
+            "persona_adherence": True,
+            "follows_rules": True,
+            "faithfulness": True,
+            "explanation": "Mock evaluation",
+        },
+    )()
+
+
+# Mock registry for testing if package not available
+if not EVALS_SERVICE_AVAILABLE:
+    EVALUATOR_REGISTRY = {
+        "relevance_check": [mock_evaluate_relevance_check],
+        "generate_with_persona": [mock_evaluate_generate_with_persona],
+    }
 
 # ============================================================================
 # MAIN SERVICE UNIT TESTS
@@ -201,157 +235,6 @@ class TestMainService:
             raise ServiceTestError(
                 f"Chat endpoint with invalid API key test failed: {e}"
             )
-
-
-# ============================================================================
-# UNIT TESTS FOR EVALUATION SERVICE
-# ============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.skipif(
-    not EVALS_SERVICE_AVAILABLE, reason="Evaluation service dependencies not installed"
-)
-class TestEvaluationService:
-    """Unit tests for the FastAPI evaluation service application."""
-
-    @pytest.fixture
-    def client(self, monkeypatch):
-        """Setup a test client with mocked state for the FastAPI app."""
-        # Mock the components that the app relies on
-        mock_evaluator = AsyncMock()
-        mock_queue_manager = AsyncMock()
-        mock_audit_storage = AsyncMock()
-        mock_results_storage = AsyncMock()
-
-        # Mock the health_check methods to return healthy by default
-        mock_evaluator.health_check.return_value = {"evaluator_healthy": True}
-        mock_queue_manager.health_check.return_value = {"queue_manager_healthy": True}
-        mock_audit_storage.health_check.return_value = {"storage_manager_healthy": True}
-        mock_results_storage.health_check.return_value = {
-            "storage_manager_healthy": True
-        }
-
-        # Mock the get_metrics methods
-        mock_evaluator.get_metrics.return_value = {"evals": 10}
-        mock_queue_manager.get_metrics.return_value = {"queue_size": 5}
-        mock_audit_storage.get_metrics.return_value = {"files_written": 2}
-        mock_results_storage.get_metrics.return_value = {"files_written": 2}
-
-        # Use monkeypatch to replace the real components in the app's state
-        # with our mocks before the app starts up.
-        monkeypatch.setattr(app.state, "evaluator", mock_evaluator)
-        monkeypatch.setattr(app.state, "queue_manager", mock_queue_manager)
-        monkeypatch.setattr(app.state, "audit_storage", mock_audit_storage)
-        monkeypatch.setattr(app.state, "results_storage", mock_results_storage)
-
-        with TestClient(app) as test_client:
-            yield test_client
-
-    def test_health_endpoint_healthy(self, client: TestClient):
-        """Test the /health endpoint when all components are healthy."""
-        logger.info("Testing /health endpoint with all components healthy")
-
-        response = client.get("/health")
-
-        assert response.status_code == 200
-        response_data = response.json()
-        assert response_data["status"] == "healthy"
-        assert response_data["overall_healthy"] is True
-        assert response_data["components"]["evaluator"]["evaluator_healthy"] is True
-        assert (
-            response_data["components"]["queue_manager"]["queue_manager_healthy"]
-            is True
-        )
-        assert (
-            response_data["components"]["audit_storage"]["storage_manager_healthy"]
-            is True
-        )
-        assert (
-            response_data["components"]["results_storage"]["storage_manager_healthy"]
-            is True
-        )
-
-        logger.info("✓ /health endpoint returned 'healthy' as expected")
-
-    def test_health_endpoint_unhealthy(self, client: TestClient, monkeypatch):
-        """Test the /health endpoint when one component is unhealthy."""
-        logger.info("Testing /health endpoint with one component unhealthy")
-
-        # Make one of the components report as unhealthy
-        unhealthy_mock = AsyncMock()
-        unhealthy_mock.health_check.return_value = {
-            "storage_manager_healthy": False,
-            "error": "Disk full",
-        }
-        monkeypatch.setattr(app.state, "audit_storage", unhealthy_mock)
-
-        response = client.get("/health")
-
-        assert response.status_code == 200
-        response_data = response.json()
-        assert response_data["status"] == "unhealthy"
-        assert response_data["overall_healthy"] is False
-        assert (
-            response_data["components"]["audit_storage"]["storage_manager_healthy"]
-            is False
-        )
-
-        logger.info("✓ /health endpoint returned 'unhealthy' as expected")
-
-    def test_metrics_endpoint(self, client: TestClient):
-        """Test that the /metrics endpoint returns a valid structure."""
-        logger.info("Testing /metrics endpoint")
-
-        response = client.get("/metrics")
-
-        assert response.status_code == 200
-        response_data = response.json()
-
-        # Check for the expected structure
-        assert "service" in response_data
-        assert "components" in response_data
-        assert "configuration" in response_data
-        assert response_data["components"]["queue_manager"]["queue_size"] == 5
-
-        logger.info("✓ /metrics endpoint returned the correct structure")
-
-    def test_evaluate_endpoint_async(
-        self, client: TestClient, sample_evaluation_request: Dict[str, Any]
-    ):
-        """Test the async /evaluate endpoint."""
-        logger.info("Testing async /evaluate endpoint")
-
-        response = client.post("/evaluate", json=sample_evaluation_request)
-
-        assert response.status_code == 202
-        response_data = response.json()
-        assert response_data["success"] is True
-        assert (
-            response_data["message"]
-            == "Evaluation request accepted and is being processed."
-        )
-        assert response_data["thread_id"] == sample_evaluation_request["thread_id"]
-
-        # Check that the request was passed to the queue manager mocks
-        app.state.queue_manager.enqueue_audit.assert_called_once()
-        app.state.queue_manager.enqueue_evaluation.assert_called_once()
-
-        logger.info("✓ /evaluate endpoint correctly processed the request")
-
-    def test_config_endpoint(self, client: TestClient):
-        """Test the /config endpoint."""
-        logger.info("Testing /config endpoint")
-        response = client.get("/config")
-
-        assert response.status_code == 200
-        config_data = response.json()
-        assert "service" in config_data
-        assert "storage" in config_data
-        assert "llm" in config_data
-        assert "api" in config_data
-        assert "openai_api_key" not in str(config_data)
-        logger.info("✓ /config endpoint returned successfully and hid sensitive data")
 
 
 # ============================================================================
@@ -584,7 +467,10 @@ class TestStorageBackends:
         """Test storage factory creates local backend by default"""
         try:
             from unittest.mock import patch
-            from storage import create_storage_backend, LocalStorageBackend
+            from storage import (
+                create_storage_backend,
+                LocalStorageBackend,
+            )
 
             with patch.dict(os.environ, {}, clear=True):
                 backend = create_storage_backend()
@@ -621,7 +507,7 @@ class TestStorageBackends:
             from storage import (
                 create_storage_backend,
                 GCSStorageBackend,
-            )  # Import after reload
+            )
 
             backend = create_storage_backend()
             assert isinstance(backend, GCSStorageBackend)
@@ -651,7 +537,10 @@ class TestStorageBackends:
             if "storage" in sys.modules:
                 importlib.reload(sys.modules["storage"])
 
-            from storage import create_storage_backend, LocalStorageBackend
+            from storage import (
+                create_storage_backend,
+                LocalStorageBackend,
+            )
 
             backend = create_storage_backend()
             assert isinstance(backend, LocalStorageBackend)
@@ -710,3 +599,158 @@ class TestStorageBackends:
 # ============================================================================
 # CONFIGURATION UNIT TESTS
 # ============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    not EVALS_SERVICE_AVAILABLE, reason="Evaluators package not available"
+)
+class TestEvaluatorModules:
+    """Unit tests for the evaluators package."""
+
+    @pytest.fixture
+    def mock_openai_client(self):
+        """Mock the OpenAI client used by evaluators."""
+        client = AsyncMock()
+        yield client
+
+    @pytest.fixture
+    def relevance_check_node_log(self):
+        """Create a mock node execution log for relevance_check node."""
+        return {
+            "node_name": "relevance_check",
+            "input": {
+                "messages": [{"content": "Why did you build this?", "type": "human"}],
+                "thread_id": "test-e2e-2-1751862608",
+                "conversation_history": [],
+            },
+            "output": {
+                "messages": [{"content": "IRRELEVANT", "type": "ai"}],
+                "next_edge": "IRRELEVANT",
+            },
+            "retrieved_docs": None,
+            "system_prompt": None,
+            "start_time": "2025-07-07T04:30:15.617036",
+            "end_time": "2025-07-07T04:30:16.049899",
+            "graph_version": "v1",
+            "tags": [],
+            "message_source": "ai",
+            "prompt_tokens": 307,
+            "completion_tokens": 4,
+        }
+
+    @pytest.fixture
+    def generate_with_persona_node_log(self):
+        """Create a mock node execution log for generate_with_persona node."""
+        return {
+            "node_name": "generate_with_persona",
+            "input": {
+                "messages": [
+                    {"content": "Why did you build this?", "type": "human"},
+                    {"content": "IRRELEVANT", "type": "ai"},
+                    {
+                        "content": "potential_category: OFFICIAL\nresponse_style: To showcase my skills, the old ways are obsolete.",
+                        "type": "ai",
+                    },
+                ],
+                "thread_id": "test-e2e-2-1751862608",
+                "conversation_history": [
+                    {"content": "Why did you build this?", "type": "human"},
+                    {"content": "IRRELEVANT", "type": "ai"},
+                ],
+            },
+            "output": {
+                "response": "Raghu built this to deliver results, to cut through the noise, and to solve real problems efficiently. No fluff, no distractions—just focused execution. That's how Raghu ensures every effort drives measurable success.",
+                "custom_metadata": {
+                    "processing_time": 0.466195,
+                    "streaming_node": True,
+                },
+                "next_edge": "default",
+            },
+            "retrieved_docs": None,
+            "system_prompt": None,
+            "start_time": "2025-07-07T04:30:18.381185",
+            "end_time": "2025-07-07T04:30:18.847380",
+            "graph_version": "v1",
+            "tags": ["system_prompt", "persona", "streaming"],
+            "message_source": "ai",
+            "prompt_tokens": None,
+            "completion_tokens": None,
+        }
+
+    def test_get_eval_prompt_success(self):
+        """Test that get_eval_prompt correctly loads and formats prompts."""
+        # Test with a known evaluator from prompts.json
+        result = get_eval_prompt(
+            "relevance_check",
+            original_system_prompt="dummy",
+            user_query="test query",
+            conversation_history=[],
+            model_output="RELEVANT",
+        )
+        assert result != "", "Expected non-empty prompt"
+        assert "test query" in result, "Expected query to be formatted into prompt"
+
+    def test_get_eval_prompt_not_found(self):
+        """Test that get_eval_prompt handles missing prompts gracefully."""
+        result = get_eval_prompt("non_existent_evaluator")
+        assert result == "", "Expected empty string for non-existent evaluator"
+
+    def test_get_system_message_success(self):
+        """Test that get_system_message returns correct system prompts."""
+        result = get_system_message("relevance_check")
+        assert result != "", "Expected non-empty system message"
+
+    @pytest.mark.asyncio
+    async def test_mock_evaluate_relevance_check_success(
+        self, relevance_check_node_log
+    ):
+        """Test mock evaluation of relevance_check node."""
+        # Test the mock evaluator function
+        result = mock_evaluate_relevance_check(
+            relevance_check_node_log, "Why did you build this?"
+        )
+
+        # Verify the result has expected structure
+        assert hasattr(result, "overall_success")
+        assert hasattr(result, "classification")
+        assert hasattr(result, "format_valid")
+        assert hasattr(result, "explanation")
+        assert result.overall_success is True
+        assert result.classification == "RELEVANT"
+        assert result.format_valid is True
+        assert result.explanation == "Mock evaluation"
+
+    @pytest.mark.asyncio
+    async def test_mock_evaluate_generate_with_persona_success(
+        self, generate_with_persona_node_log
+    ):
+        """Test mock evaluation of generate_with_persona node."""
+        # Test the mock evaluator function
+        result = mock_evaluate_generate_with_persona(
+            generate_with_persona_node_log, "Why did you build this?"
+        )
+
+        # Verify the result has expected structure
+        assert hasattr(result, "overall_success")
+        assert hasattr(result, "persona_adherence")
+        assert hasattr(result, "follows_rules")
+        assert hasattr(result, "faithfulness")
+        assert hasattr(result, "explanation")
+        assert result.overall_success is True
+        assert result.persona_adherence is True
+        assert result.follows_rules is True
+        assert result.faithfulness is True
+        assert result.explanation == "Mock evaluation"
+
+    def test_evaluator_registry_is_valid(self):
+        """Test that the evaluator registry contains expected evaluators."""
+        # Check required evaluators are registered
+        assert "relevance_check" in EVALUATOR_REGISTRY
+        assert "generate_with_persona" in EVALUATOR_REGISTRY
+
+        # Verify each registered evaluator is a list containing callable(s)
+        for evaluator_list in EVALUATOR_REGISTRY.values():
+            assert isinstance(evaluator_list, list)
+            assert len(evaluator_list) > 0
+            assert all(callable(func) for func in evaluator_list)

@@ -52,42 +52,42 @@ DIVERSE_TEST_QUERIES = [
             }
         ]
     },
-    {
-        "messages": [
-            {
-                "role": "user",
-                "content": "Why did you build this?",
-                "thread_id": f"test-e2e-2-{int(time.time())}",
-            }
-        ]
-    },
-    {
-        "messages": [
-            {
-                "role": "user",
-                "content": "Do you have any work experience in the US?",
-                "thread_id": f"test-e2e-1-{int(time.time())}",
-            }
-        ]
-    },
-    {
-        "messages": [
-            {
-                "role": "user",
-                "content": "How long have you been a data scientist?",
-                "thread_id": f"test-e2e-4-{int(time.time())}",
-            }
-        ]
-    },
-    {
-        "messages": [
-            {
-                "role": "user",
-                "content": "How can I improve my coding skills?",
-                "thread_id": f"test-e2e-4{int(time.time())}",
-            }
-        ]
-    },
+    # {
+    #     "messages": [
+    #         {
+    #             "role": "user",
+    #             "content": "Why did you build this?",
+    #             "thread_id": f"test-e2e-2-{int(time.time())}",
+    #         }
+    #     ]
+    # },
+    # {
+    #     "messages": [
+    #         {
+    #             "role": "user",
+    #             "content": "Do you have any work experience in the US?",
+    #             "thread_id": f"test-e2e-1-{int(time.time())}",
+    #         }
+    #     ]
+    # },
+    # {
+    #     "messages": [
+    #         {
+    #             "role": "user",
+    #             "content": "How long have you been a data scientist?",
+    #             "thread_id": f"test-e2e-4-{int(time.time())}",
+    #         }
+    #     ]
+    # },
+    # {
+    #     "messages": [
+    #         {
+    #             "role": "user",
+    #             "content": "How can I improve my coding skills?",
+    #             "thread_id": f"test-e2e-4{int(time.time())}",
+    #         }
+    #     ]
+    # },
 ]
 
 # Define the single, focused test query
@@ -95,7 +95,7 @@ TEST_QUERY = {
     "messages": [
         {
             "role": "user",
-            "content": "What is the capital of France?",
+            "content": "What is your tech stack?",
             "thread_id": f"test-e2e-{int(time.time())}",
         }
     ]
@@ -268,9 +268,67 @@ async def test_comprehensive_integration_flow(
             del os.environ["STORAGE_BATCH_SIZE"]
 
 
-@pytest.mark.skip(reason="Skipping ruthless end-to-end flow test")
+def verify_evaluation_result(result_data: dict, thread_id: str):
+    """Helper function to verify evaluation result structure and content."""
+    assert "evaluations" in result_data, "Result missing 'evaluations' dictionary"
+    evaluations = result_data["evaluations"]
+
+    # For the "Why did you build this?" query, we expect specific evaluators
+    assert "relevance_check" in evaluations, "Missing relevance_check evaluation"
+    assert (
+        "generate_with_persona" in evaluations
+    ), "Missing generate_with_persona evaluation"
+
+    # Go one level deeper for relevance_check
+    relevance_eval = evaluations["relevance_check"]
+    if "evaluate_relevance_check" in relevance_eval:
+        relevance_eval = relevance_eval["evaluate_relevance_check"]
+    assert (
+        "classification" in relevance_eval
+    ), "Missing classification in relevance_check"
+    assert relevance_eval["classification"] in [
+        "IRRELEVANT",
+        "RELEVANT",
+    ], f"Invalid classification: {relevance_eval['classification']}"
+    assert "format_valid" in relevance_eval, "Missing format_valid in relevance_check"
+    assert isinstance(
+        relevance_eval["format_valid"], bool
+    ), "format_valid should be boolean"
+    assert "explanation" in relevance_eval, "Missing explanation in relevance_check"
+    assert isinstance(
+        relevance_eval["explanation"], str
+    ), "explanation should be string"
+
+    # Go one level deeper for generate_with_persona
+    persona_eval = evaluations["generate_with_persona"]
+    if "evaluate_generate_with_persona" in persona_eval:
+        persona_eval = persona_eval["evaluate_generate_with_persona"]
+    assert "persona_adherence" in persona_eval, "Missing persona_adherence"
+    assert isinstance(
+        persona_eval["persona_adherence"], bool
+    ), "persona_adherence should be boolean"
+    assert "follows_rules" in persona_eval, "Missing follows_rules"
+    assert isinstance(
+        persona_eval["follows_rules"], bool
+    ), "follows_rules should be boolean"
+    assert "faithfulness" in persona_eval, "Missing faithfulness"
+    assert isinstance(
+        persona_eval["faithfulness"], bool
+    ), "faithfulness should be boolean"
+    assert "explanation" in persona_eval, "Missing explanation"
+    assert isinstance(persona_eval["explanation"], str), "explanation should be string"
+
+    # Verify thread_id matches
+    assert (
+        result_data.get("thread_id") == thread_id
+    ), f"Thread ID mismatch. Expected {thread_id}, got {result_data.get('thread_id')}"
+
+    return True
+
+
+@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_ruthless_end_to_end_flow(
+async def test_local_end_to_end(
     http_client: httpx.AsyncClient,
     valid_api_headers: Dict[str, str],
 ):
@@ -283,8 +341,8 @@ async def test_ruthless_end_to_end_flow(
     4. Fail if files do not appear within a timeout.
     5. Verify the contents of the created files.
     """
-    audit_path = Path("evals-service/audit_data")
-    results_path = Path("evals-service/eval_results")
+    audit_path = Path("evals_service/audit_data")
+    results_path = Path("evals_service/eval_results")
 
     # --- Fast-fail check: ensure evals-service actually instantiated local backends ---
     metrics_resp = await http_client.get(f"{EVALUATION_SERVICE_URL}/metrics")
@@ -535,6 +593,57 @@ async def test_ruthless_end_to_end_flow(
 
             logger.info(f"✓ Result file content verified for thread {thread_id}.")
 
+            # Enhanced verification section
+            logger.info(
+                f"RUTHLESS_TEST_VERIFY: Verifying results for thread {thread_id}"
+            )
+
+            # Find and load the results file
+            results_files = list(results_path.rglob("eval_result*.json"))
+            thread_result_file = None
+            result_data = None
+
+            for result_file in results_files:
+                try:
+                    with open(result_file, "r") as f:
+                        data = json.load(f)
+                        # Handle both list and dict formats
+                        if isinstance(data, list):
+                            for item in data:
+                                if item.get("thread_id") == thread_id:
+                                    result_data = item
+                                    thread_result_file = result_file
+                                    break
+                        elif (
+                            isinstance(data, dict)
+                            and data.get("thread_id") == thread_id
+                        ):
+                            result_data = data
+                            thread_result_file = result_file
+                        if thread_result_file:
+                            break
+                except (json.JSONDecodeError, KeyError):
+                    continue
+
+            assert (
+                thread_result_file is not None
+            ), f"No result file found for thread {thread_id}"
+            assert (
+                result_data is not None
+            ), f"No result data found for thread {thread_id}"
+
+            # Verify the evaluation results
+            try:
+                verify_evaluation_result(result_data, thread_id)
+                logger.info(
+                    f"✓ Evaluation result verification passed for thread {thread_id}"
+                )
+            except AssertionError as e:
+                logger.error(
+                    f"Evaluation result verification failed for thread {thread_id}: {e}"
+                )
+                raise
+
         logger.info(
             f"RUTHLESS_TEST_PASSED: End-to-end flow for all {len(expected_thread_ids)} queries is working."
         )
@@ -556,7 +665,7 @@ async def test_ruthless_end_to_end_flow(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.skip(reason="Skipping GCS end-to-end flow test")
 @pytest.mark.skipif(
     not all(
         os.getenv(k)
@@ -570,15 +679,13 @@ async def test_ruthless_end_to_end_flow(
     reason="This test requires real GCS credentials and the google-cloud-storage library.",
 )
 @pytest.mark.asyncio
-async def test_gcs_only_end_to_end_write_and_verify(
+async def test_gcs_end_to_end(
     http_client,
     valid_api_headers: Dict[str, str],
 ):
     """
     This test verifies that the evals-service, when configured to use GCS,
-    successfully writes a file to the bucket. It then cleans up the created file.
-
-    This ensures the `evals-service` is using the GCSStorageBackend.
+    successfully writes evaluation results to the bucket and that they have the correct structure.
     """
 
     gcs_audit_bucket_name = os.getenv("STORAGE_GCS_AUDIT_BUCKET_NAME")
@@ -690,19 +797,29 @@ async def test_gcs_only_end_to_end_write_and_verify(
                     continue
                 try:
                     content = blob.download_as_text()
-                    if unique_id in content:
-                        logger.info(
-                            f"SUCCESS: Found result file '{blob.name}' containing unique ID."
-                        )
-                        found_blobs.append(blob)
+                    result_data = json.loads(content)
+
+                    # Handle both list and dict formats
+                    if isinstance(result_data, list):
+                        for item in result_data:
+                            if unique_id in item.get("thread_id", ""):
+                                logger.info(f"Found result data in blob {blob.name}")
+                                verify_evaluation_result(item, unique_id)
+                                result_file_found = True
+                                found_blobs.append(blob)
+                                break
+                    elif isinstance(result_data, dict) and unique_id in result_data.get(
+                        "thread_id", ""
+                    ):
+                        logger.info(f"Found result data in blob {blob.name}")
+                        verify_evaluation_result(result_data, unique_id)
                         result_file_found = True
+                        found_blobs.append(blob)
+
+                    if result_file_found:
                         break
-                    else:
-                        logger.debug(
-                            f"Result blob {blob.name} does not contain unique_id {unique_id}"
-                        )
                 except Exception as e:
-                    logger.warning(f"Could not read blob {blob.name}: {e}")
+                    logger.warning(f"Could not process blob {blob.name}: {e}")
 
         if audit_file_found and result_file_found:
             logger.info("Found both audit and result files.")

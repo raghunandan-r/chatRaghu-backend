@@ -24,18 +24,16 @@ except ImportError:
 # Setup path and import models
 def _setup_imports():
     """Setup imports with proper path handling"""
-    evals_path = Path(__file__).parent.parent / "evals-service"
-    sys.path.insert(0, str(evals_path))
+    project_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(project_root))
 
-    try:
-        from models import ConversationFlow, EnrichedNodeExecutionLog
+    # This import is crucial to set up the shims
+    import evals_service
 
-        return ConversationFlow, EnrichedNodeExecutionLog
-    except ImportError:
-        # Fallback for when PYTHONPATH is not set (IDE/linting)
-        from evals_service.models import ConversationFlow, EnrichedNodeExecutionLog
+    # Now we can use the shimmed imports
+    from models import ConversationFlow, EnrichedNodeExecutionLog
 
-        return ConversationFlow, EnrichedNodeExecutionLog
+    return ConversationFlow, EnrichedNodeExecutionLog
 
 
 ConversationFlow, EnrichedNodeExecutionLog = _setup_imports()
@@ -57,7 +55,7 @@ TEST_API_KEY = os.getenv("TEST_API_KEY", "test_api_key_123")
 
 
 class ServiceTestError(Exception):
-    """Custom exception for service test failures"""
+    """Base exception for service test failures"""
 
     pass
 

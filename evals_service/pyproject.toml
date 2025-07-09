@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evals_service"
+version = "0.1.0"
+authors = [
+    { name="Raghu" },
+]
+description = "Evaluation service for ChatRaghu"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[tool.setuptools]
+package-data = {"evals_service" = ["secrets/*", "eval_results/*", "audit_data/*"]}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evals_service*"]
+namespaces = false

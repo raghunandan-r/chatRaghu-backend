@@ -139,3 +139,8 @@ class Config(BaseSettings):
 
 # Global configuration instance
 config = Config()
+
+
+def get_config() -> Config:
+    """Return the global config instance (for backward compatibility)"""
+    return config

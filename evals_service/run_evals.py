@@ -1,16 +1,24 @@
-from pathlib import Path
-from dotenv import load_dotenv
-from utils.logger import logger
-from typing import Dict, List, Optional
+"""
+Main evaluation runner for processing node outputs.
+"""
+
 import backoff
 import time
-from datetime import datetime
-from models import EvaluationResult, RetryConfig, ConversationFlow
-from evaluators import (
-    EVALUATOR_REGISTRY,
-)
-from config import config
 import traceback
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+from dotenv import load_dotenv
+from pathlib import Path
+from utils.logger import logger
+from models import (
+    EvaluationResult,
+    RetryConfig,
+    ConversationFlow,
+    EnrichedNodeExecutionLog,
+)
+from evaluators.models import NodeEvaluation
+from evaluators import EVALUATOR_REGISTRY
+from config import config
 
 # Load environment variables from .env file
 # Get the project root directory (assuming evals is in project root)
@@ -311,3 +319,51 @@ class AsyncEvaluator:
             "llm_model": config.llm.openai_model,
             "max_retry_attempts": config.service.max_retry_attempts,
         }
+
+
+async def evaluate_response(
+    node_execution: EnrichedNodeExecutionLog,
+    user_query: str,
+) -> Tuple[Dict[str, NodeEvaluation], bool]:
+    """
+    Evaluates a node's output using registered evaluators.
+
+    Args:
+        node_execution: The enriched node execution log containing input/output
+        user_query: The original user query that triggered this execution
+
+    Returns:
+        Tuple of:
+        - Dict mapping evaluator names to their evaluation results
+        - Boolean indicating if all evaluations passed
+    """
+    node_name = node_execution.node_name
+    evaluator_functions = EVALUATOR_REGISTRY.get(node_name, [])
+
+    if not evaluator_functions:
+        logger.warning(f"No evaluators registered for node: {node_name}")
+        return {}, True
+
+    node_eval_results = {}
+    all_passed = True
+
+    for evaluator_func in evaluator_functions:
+        eval_name = evaluator_func.__name__
+        try:
+            result = await evaluator_func(node_execution, user_query)
+            node_eval_results[eval_name] = result
+            if not result.overall_success:
+                all_passed = False
+
+        except Exception as e:
+            logger.error(
+                f"Failed to run evaluator {eval_name}",
+                extra={
+                    "error": str(e),
+                    "node_name": node_name,
+                    "evaluator": eval_name,
+                },
+            )
+            all_passed = False
+
+    return node_eval_results, all_passed

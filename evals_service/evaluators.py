@@ -1,3 +1,16 @@
+"""
+DEPRECATED: This file has been replaced by the evaluators/ package.
+All functionality has been moved to separate modules in that package.
+This file will be removed in a future update.
+
+Please update your imports to use the new package structure:
+from evaluators import EVALUATOR_REGISTRY
+"""
+
+# Re-export the registry from the new package
+# DEPRECATED: This import is removed to prevent circular imports
+# from .evaluators import EVALUATOR_REGISTRY
+
 from datetime import datetime
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
@@ -495,7 +508,6 @@ Your task is to evaluate this RAG response across four critical dimensions:
 2. ANSWER RELEVANCE: Does the AI response directly address the user's query?
    - True: The response answers the main point of the query and stays on topic
    - False: The response misses the point, provides tangential information, or doesn't address the core question
-   - Note: Evaluate the response quality regardless of document quality
 
 3. KEY INFORMATION: Does the response include important details from the context?
    - True: Includes specific facts, numbers, dates, names, and key details when available in context

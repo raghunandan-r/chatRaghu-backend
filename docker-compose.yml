@@ -26,18 +26,18 @@ services:
   # Evaluation service
   evaluation-service:
     build:
-      context: ./evals-service
+      context: ./evals_service
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
     volumes:
       # Mounts the host's evals-service directory into the container at /app
       # This enables live code reloading for the evaluation service
-      - ./evals-service:/app
+      - ./evals_service:/app
       # Persist evaluation results outside the container
-      - ./evals-service/eval_results:/app/eval_results
+      - ./evals_service/eval_results:/app/eval_results
       # Persist audit data outside the container
-      - ./evals-service/audit_data:/app/audit_data
+      - ./evals_service/audit_data:/app/audit_data
     env_file:
       - .env
     environment:
