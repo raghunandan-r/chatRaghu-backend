@@ -42,8 +42,7 @@ class EnrichedNodeExecutionLog(BaseModel):
     retrieved_docs: Optional[List[Dict[str, Any]]] = None
     system_prompt: Optional[str] = None
     start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    graph_version: str = ""
+    end_time: Optional[datetime] = None    
     tags: List[str] = Field(default_factory=list)
     message_source: Literal[
         "human", "ai"
@@ -63,6 +62,7 @@ class ConversationFlow(BaseModel):
     user_query: str
     start_time: datetime = Field(default_factory=datetime.utcnow)
     end_time: Optional[datetime] = None
+    graph_version: Optional[str] = None  # Allows the caller to specify; defaults to None if not provided
     node_executions: List[EnrichedNodeExecutionLog] = Field(
         default_factory=list
     )  # Updated to use EnrichedNodeExecutionLog

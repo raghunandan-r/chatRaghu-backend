@@ -25,7 +25,7 @@ async def evaluate_relevance_check(
 
     model_output = node_execution.output.get("messages", [{}])[0].get("content", "")
     conversation_history = node_execution.input.get("conversation_history", [])
-    original_system_prompt = get_main_graph_prompt("relevance_check")
+    # original_system_prompt = get_main_graph_prompt("relevance_check")
 
     logger.info(
         "Starting relevance_check evaluation",
@@ -34,7 +34,7 @@ async def evaluate_relevance_check(
 
     eval_prompt = get_eval_prompt(
         "relevance_check",
-        original_system_prompt=original_system_prompt,
+        # original_system_prompt=original_system_prompt,
         user_query=user_query,
         conversation_history=conversation_history,
         model_output=model_output,
