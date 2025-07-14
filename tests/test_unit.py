@@ -356,7 +356,7 @@ class TestStorageBackends:
             from pathlib import Path
 
             backend = LocalStorageBackend(temp_storage_path)
-            filename = "test_batch.json"
+            filename = "test_batch.jsonl"
 
             success = await backend.write_batch(sample_storage_data, filename)
 
@@ -369,7 +369,7 @@ class TestStorageBackends:
             assert file_path.exists()
 
             with open(file_path, "r") as f:
-                saved_data = json.load(f)
+                saved_data = [json.loads(line) for line in f if line.strip()]
 
             assert saved_data == sample_storage_data
             logger.info("✓ Local storage batch write test passed")
@@ -404,8 +404,8 @@ class TestStorageBackends:
             backend = LocalStorageBackend(temp_storage_path)
 
             # Write some test data first
-            await backend.write_batch(sample_storage_data, "test1.json")
-            await backend.write_batch(sample_storage_data, "test2.json")
+            await backend.write_batch(sample_storage_data, "test1.jsonl")
+            await backend.write_batch(sample_storage_data, "test2.jsonl")
 
             metrics = await backend.get_metrics()
 
@@ -442,7 +442,7 @@ class TestStorageBackends:
         from storage import GCSStorageBackend
 
         backend = GCSStorageBackend("test-bucket")
-        success = await backend.write_batch(sample_storage_data, "test.json")
+        success = await backend.write_batch(sample_storage_data, "test.jsonl")
 
         assert success is True
         assert backend._write_count == 1

@@ -48,8 +48,10 @@ Thumbs.db
 
 # Evaluation results
 eval_results/
+audit_data/
 *.parquet
 *.json
+*.jsonl
 *.csv
 
 # Logs

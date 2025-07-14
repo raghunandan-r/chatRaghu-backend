@@ -34,20 +34,21 @@ class LocalStorageBackend:
         self._error_count = 0
 
     async def write_batch(self, data: List[Dict[str, Any]], filename: str) -> bool:
-        """Write batch data to JSON file"""
+        """Write batch data to JSONL file"""
         try:
-            # Ensure filename has .json extension
-            if not filename.endswith(".json"):
-                filename = f"{filename}.json"
+            # Ensure filename has .jsonl extension
+            if not filename.endswith(".jsonl"):
+                filename = f"{filename}.jsonl"
 
             json_path = self.base_path / filename
 
             # Ensure directory exists
             json_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Write to JSON with pretty formatting
+            # Write to JSONL with one JSON object per line
             with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                for record in data:
+                    f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
             self._write_count += 1
             logger.info(
@@ -89,7 +90,8 @@ class LocalStorageBackend:
     async def get_metrics(self) -> Dict[str, Any]:
         """Get local storage metrics"""
         try:
-            json_files = list(self.base_path.rglob("*.json"))
+            # Update to look for .jsonl files instead of .json
+            json_files = list(self.base_path.rglob("*.jsonl"))
             total_json_files = len(json_files)
             total_json_size = sum(f.stat().st_size for f in json_files)
 
@@ -139,7 +141,7 @@ class GCSStorageBackend:
         self._error_count = 0
 
     async def write_batch(self, data: List[Dict[str, Any]], filename: str) -> bool:
-        """Write batch data to a GCS blob."""
+        """Write batch data to a GCS blob in JSONL format."""
         if not self.storage_client:
             self._error_count += 1
             return False
@@ -147,11 +149,16 @@ class GCSStorageBackend:
         try:
             blob = self.bucket.blob(filename)
 
+            # Create a single string in JSONL format (one JSON object per line)
+            jsonl_data = "\n".join(
+                json.dumps(record, ensure_ascii=False, default=str) for record in data
+            )
+
             # Use a non-blocking call for the upload
             await asyncio.to_thread(
                 blob.upload_from_string,
-                data=json.dumps(data, indent=2, ensure_ascii=False, default=str),
-                content_type="application/json",
+                data=jsonl_data,
+                content_type="application/x-ndjson",
             )
 
             self._write_count += 1
@@ -334,7 +341,7 @@ class StorageManager:
 
         # --- New Flattened Path Logic ---
         # Embed date and run_id into the filename for BigQuery compatibility.
-        filename = f"{self.file_prefix}_{run_id}_{timestamp}.json"
+        filename = f"{self.file_prefix}_{run_id}_{timestamp}.jsonl"
 
         # Prepend the path prefix if it exists to create a top-level folder
         if self.path_prefix:

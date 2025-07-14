@@ -152,10 +152,10 @@ async def test_comprehensive_integration_flow(
             audit_data_path = Path("evals-service/audit_data")
             eval_results_path = Path("evals-service/eval_results")
 
-            initial_audit_files = len(list(audit_data_path.rglob("*.json"))) + len(
+            initial_audit_files = len(list(audit_data_path.rglob("*.jsonl"))) + len(
                 list(audit_data_path.rglob("*.parquet"))
             )
-            initial_eval_files = len(list(eval_results_path.rglob("*.json"))) + len(
+            initial_eval_files = len(list(eval_results_path.rglob("*.jsonl"))) + len(
                 list(eval_results_path.rglob("*.parquet"))
             )
 
@@ -201,10 +201,10 @@ async def test_comprehensive_integration_flow(
             logger.info("Step 5: Verifying files were created")
 
             # Check files in host filesystem (volumes are mounted)
-            final_audit_files = len(list(audit_data_path.rglob("*.json"))) + len(
+            final_audit_files = len(list(audit_data_path.rglob("*.jsonl"))) + len(
                 list(audit_data_path.rglob("*.parquet"))
             )
-            final_eval_files = len(list(eval_results_path.rglob("*.json"))) + len(
+            final_eval_files = len(list(eval_results_path.rglob("*.jsonl"))) + len(
                 list(eval_results_path.rglob("*.parquet"))
             )
 
@@ -228,7 +228,7 @@ async def test_comprehensive_integration_flow(
             # Step 6: Check file contents (optional)
             if audit_files_created:
                 logger.info("Step 6: Checking audit file contents")
-                audit_files = list(audit_data_path.rglob("*.json"))
+                audit_files = list(audit_data_path.rglob("*.jsonl"))
                 if audit_files:
                     latest_audit_file = max(
                         audit_files, key=lambda f: f.stat().st_mtime
@@ -236,18 +236,18 @@ async def test_comprehensive_integration_flow(
                     logger.info(f"Latest audit file: {latest_audit_file}")
 
                     with open(latest_audit_file, "r") as f:
-                        audit_data = json.load(f)
+                        audit_data = [json.loads(line) for line in f if line.strip()]
                         logger.info(f"Audit file contains {len(audit_data)} records")
 
             if eval_files_created:
                 logger.info("Step 6: Checking evaluation result file contents")
-                eval_files = list(eval_results_path.rglob("*.json"))
+                eval_files = list(eval_results_path.rglob("*.jsonl"))
                 if eval_files:
                     latest_eval_file = max(eval_files, key=lambda f: f.stat().st_mtime)
                     logger.info(f"Latest eval file: {latest_eval_file}")
 
                     with open(latest_eval_file, "r") as f:
-                        eval_data = json.load(f)
+                        eval_data = [json.loads(line) for line in f if line.strip()]
                         logger.info(f"Eval file contains {len(eval_data)} records")
 
         logger.info("✓ Comprehensive integration flow completed successfully")
@@ -386,7 +386,7 @@ async def test_local_end_to_end(
     # 1. Clean up old files
     logger.info("RUTHLESS_TEST_CLEANUP: Deleting old test files...")
     # Clean up audit data
-    for p in audit_path.rglob("*.json"):
+    for p in audit_path.rglob("*.jsonl"):
         p.unlink()
     # Remove empty date and run_id directories
     for date_dir in audit_path.iterdir():
@@ -403,7 +403,7 @@ async def test_local_end_to_end(
                 pass  # Directory not empty or other error, skip it
 
     # Clean up eval results
-    for p in results_path.rglob("*.json"):
+    for p in results_path.rglob("*.jsonl"):
         p.unlink()
     # Remove empty date and run_id directories
     for date_dir in results_path.iterdir():
@@ -476,13 +476,15 @@ async def test_local_end_to_end(
 
         while time.time() - start_time < timeout:
             # Check for audit files - now using recursive glob for partitioned structure
-            audit_files = list(audit_path.rglob("audit_request*.json"))
+            audit_files = list(audit_path.rglob("audit_request*.jsonl"))
             for audit_file in audit_files:
                 try:
                     with open(audit_file, "r") as f:
-                        audit_data = json.load(f)
-                        if isinstance(audit_data, list) and len(audit_data) > 0:
-                            thread_id = audit_data[0].get("thread_id")
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            audit_data = json.loads(line)
+                            thread_id = audit_data.get("thread_id")
                             if (
                                 thread_id in expected_thread_ids
                                 and thread_id not in found_audit_files
@@ -499,35 +501,20 @@ async def test_local_end_to_end(
                                         },
                                     },
                                 )
-                except (json.JSONDecodeError, KeyError, IndexError):
+                                break
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Error processing audit file {audit_file}: {e}")
                     continue
 
             # Check for result files - now using recursive glob for partitioned structure
-            results_files = list(results_path.rglob("eval_result*.json"))
+            results_files = list(results_path.rglob("eval_result*.jsonl"))
             for result_file in results_files:
                 try:
                     with open(result_file, "r") as f:
-                        result_data = json.load(f)
-                        # Handle both list and dict formats
-                        if isinstance(result_data, list) and len(result_data) > 0:
-                            thread_id = result_data[0].get("thread_id")
-                            if (
-                                thread_id in expected_thread_ids
-                                and thread_id not in found_result_files
-                            ):
-                                found_result_files[thread_id] = result_file
-                                logger.info(
-                                    f"RUTHLESS_TEST_RESULT_FOUND: Found result file for thread {thread_id}: {result_file}",
-                                    extra={
-                                        "thread_id": thread_id,
-                                        "file_path": str(result_file),
-                                        "partition_info": {
-                                            "date": result_file.parent.parent.name,
-                                            "run_id": result_file.parent.name,
-                                        },
-                                    },
-                                )
-                        elif isinstance(result_data, dict):
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            result_data = json.loads(line)
                             thread_id = result_data.get("thread_id")
                             if (
                                 thread_id in expected_thread_ids
@@ -545,7 +532,9 @@ async def test_local_end_to_end(
                                         },
                                     },
                                 )
-                except (json.JSONDecodeError, KeyError):
+                                break
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Error processing result file {result_file}: {e}")
                     continue
 
             # Check if we found files for all expected thread IDs
@@ -576,35 +565,37 @@ async def test_local_end_to_end(
             # Verify audit file
             audit_file_path = found_audit_files[thread_id]
             with open(audit_file_path) as f:
-                audit_data = json.load(f)
-                # Handle list format for audit data
-                if isinstance(audit_data, list) and len(audit_data) > 0:
-                    assert audit_data[0]["thread_id"] == thread_id
+                for line in f:
+                    if not line.strip():
+                        continue
+                    audit_data = json.loads(line)
+                    if audit_data["thread_id"] == thread_id:
+                        break
                 else:
-                    assert audit_data["thread_id"] == thread_id
+                    raise AssertionError(
+                        f"Thread ID {thread_id} not found in audit file"
+                    )
             logger.info(f"✓ Audit file content verified for thread {thread_id}.")
 
             # Verify result file
             results_file_path = found_result_files[thread_id]
             with open(results_file_path) as f:
-                results_data = json.load(f)
-                # Handle both list and dict formats for result data
-                if isinstance(results_data, list) and len(results_data) > 0:
-                    assert results_data[0]["thread_id"] == thread_id
-                    assert (
-                        "metadata" in results_data[0]
-                    ), f"Missing metadata in results data for thread {thread_id}"
-                    assert (
-                        "overall_success" in results_data[0]["metadata"]
-                    ), f"Missing overall_success in metadata for thread {thread_id}"
+                for line in f:
+                    if not line.strip():
+                        continue
+                    results_data = json.loads(line)
+                    if results_data["thread_id"] == thread_id:
+                        assert (
+                            "metadata" in results_data
+                        ), f"Missing metadata in results data for thread {thread_id}"
+                        assert (
+                            "overall_success" in results_data["metadata"]
+                        ), f"Missing overall_success in metadata for thread {thread_id}"
+                        break
                 else:
-                    assert results_data["thread_id"] == thread_id
-                    assert (
-                        "metadata" in results_data
-                    ), f"Missing metadata in results data for thread {thread_id}"
-                    assert (
-                        "overall_success" in results_data["metadata"]
-                    ), f"Missing overall_success in metadata for thread {thread_id}"
+                    raise AssertionError(
+                        f"Thread ID {thread_id} not found in results file"
+                    )
 
             logger.info(f"✓ Result file content verified for thread {thread_id}.")
 
@@ -614,30 +605,25 @@ async def test_local_end_to_end(
             )
 
             # Find and load the results file
-            results_files = list(results_path.rglob("eval_result*.json"))
+            results_files = list(results_path.rglob("eval_result*.jsonl"))
             thread_result_file = None
             result_data = None
 
             for result_file in results_files:
                 try:
                     with open(result_file, "r") as f:
-                        data = json.load(f)
-                        # Handle both list and dict formats
-                        if isinstance(data, list):
-                            for item in data:
-                                if item.get("thread_id") == thread_id:
-                                    result_data = item
-                                    thread_result_file = result_file
-                                    break
-                        elif (
-                            isinstance(data, dict)
-                            and data.get("thread_id") == thread_id
-                        ):
-                            result_data = data
-                            thread_result_file = result_file
+                        for line in f:
+                            if not line.strip():
+                                continue
+                            data = json.loads(line)
+                            if data.get("thread_id") == thread_id:
+                                result_data = data
+                                thread_result_file = result_file
+                                break
                         if thread_result_file:
                             break
-                except (json.JSONDecodeError, KeyError):
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Error processing result file {result_file}: {e}")
                     continue
 
             assert (
@@ -809,24 +795,19 @@ async def test_gcs_end_to_end(
                     continue
                 try:
                     content = blob.download_as_text()
-                    result_data = json.loads(content)
-
-                    # Handle both list and dict formats
-                    if isinstance(result_data, list):
-                        for item in result_data:
-                            if unique_id in item.get("thread_id", ""):
-                                logger.info(f"Found result data in blob {blob.name}")
-                                verify_evaluation_result(item, unique_id)
-                                result_file_found = True
-                                found_blobs.append(blob)
-                                break
-                    elif isinstance(result_data, dict) and unique_id in result_data.get(
-                        "thread_id", ""
-                    ):
-                        logger.info(f"Found result data in blob {blob.name}")
-                        verify_evaluation_result(result_data, unique_id)
-                        result_file_found = True
-                        found_blobs.append(blob)
+                    # A GCS file can contain multiple JSONL records. Split by newline.
+                    # Filter out any empty lines that might result from a trailing newline.
+                    result_lines = [
+                        line for line in content.strip().split("\n") if line
+                    ]
+                    for line in result_lines:
+                        result_data = json.loads(line)
+                        if unique_id in result_data.get("thread_id", ""):
+                            logger.info(f"Found result data in blob {blob.name}")
+                            verify_evaluation_result(result_data, unique_id)
+                            result_file_found = True
+                            found_blobs.append(blob)
+                            break
 
                     if result_file_found:
                         break
