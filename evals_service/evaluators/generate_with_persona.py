@@ -6,7 +6,7 @@ from config import config
 from utils.logger import logger
 from models import EnrichedNodeExecutionLog
 
-from .base import client, get_eval_prompt, get_system_message, get_main_graph_prompt
+from .base import client, get_eval_prompt, get_system_message
 from .judgements import LLMGenerateWithPersonaJudgement
 from .models import GenerateWithPersonaEval
 
@@ -37,9 +37,9 @@ async def evaluate_generate_with_persona(
                 previous_ai_message = message.get("content", "")
                 break
 
-    system_prompt = node_execution.system_prompt or get_main_graph_prompt(
-        "generate_with_persona"
-    )
+    # system_prompt = node_execution.system_prompt or get_main_graph_prompt(
+    #     "generate_with_persona"
+    # )
 
     logger.info(
         "Starting generate_with_persona evaluation",
@@ -50,7 +50,7 @@ async def evaluate_generate_with_persona(
 
     eval_prompt = get_eval_prompt(
         "generate_with_persona",
-        system_prompt=system_prompt,
+        # system_prompt=system_prompt,
         message_history_str=message_history_str,
         user_query=user_query,
         previous_ai_message=previous_ai_message or "None",
@@ -97,7 +97,7 @@ async def evaluate_generate_with_persona(
                 "follows_rules": judgement.follows_rules,
             },
             metadata={
-                "system_prompt": system_prompt,
+                # "system_prompt": system_prompt,
                 "llm_judgement": judgement.model_dump(),
             },
         )

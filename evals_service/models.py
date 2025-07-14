@@ -36,7 +36,6 @@ class EnrichedNodeExecutionLog(BaseModel):
     system_prompt: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
-    graph_version: str = ""
     tags: List[str] = Field(default_factory=list)
     message_source: Literal[
         "human", "ai"
@@ -56,6 +55,7 @@ class ConversationFlow(BaseModel):
     user_query: str
     start_time: datetime = Field(default_factory=datetime.utcnow)
     end_time: Optional[datetime] = None
+    graph_version: str = ""
     node_executions: List[EnrichedNodeExecutionLog] = Field(
         default_factory=list
     )  # Updated to use EnrichedNodeExecutionLog
@@ -89,6 +89,7 @@ class EvaluationResult(BaseModel):
     run_id: str
     thread_id: str
     turn_index: int
+    graph_version: str = ""
 
     # Timestamps & Latency
     timestamp_start: datetime  # Renamed from timestamp for clarity
@@ -96,6 +97,7 @@ class EvaluationResult(BaseModel):
     graph_latency_ms: Optional[float] = None
     time_to_first_token_ms: Optional[float] = None
     evaluation_latency_ms: Optional[float] = None
+    total_latency_ms: Optional[float] = None  # Total end-to-end latency
 
     # Core conversation data
     query: str
@@ -108,8 +110,8 @@ class EvaluationResult(BaseModel):
     eval_total_prompt_tokens: Optional[int] = None
     eval_total_completion_tokens: Optional[int] = None
 
-    # The actual evaluation results
-    evaluations: Dict[str, Any] = Field(default_factory=dict)
+    # The actual evaluation results - now a list for flattened structure
+    evaluations: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Overall metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)

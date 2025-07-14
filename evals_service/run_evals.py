@@ -99,7 +99,7 @@ class AsyncEvaluator:
                 },
             )
 
-            evaluations = {}
+            evaluations = []  # Changed to list for flattened structure
             eval_token_usage = {"prompt": 0, "completion": 0}
 
             # Evaluate relevant nodes in the conversation flow using the registry
@@ -114,7 +114,6 @@ class AsyncEvaluator:
                     )
                     continue
 
-                node_eval_results = {}
                 for evaluator_func in evaluator_functions:
                     eval_name = evaluator_func.__name__
                     try:
@@ -122,8 +121,26 @@ class AsyncEvaluator:
                             node_execution=node_execution, user_query=query
                         )
 
-                        # Store this specific evaluation's result
-                        node_eval_results[eval_name] = eval_result.model_dump()
+                        # Get the evaluation result as dict
+                        eval_dump = eval_result.model_dump()
+
+                        # Truncate long explanation strings
+                        if "explanation" in eval_dump and isinstance(
+                            eval_dump["explanation"], str
+                        ):
+                            eval_dump["explanation"] = (
+                                eval_dump["explanation"][:500] + "..."
+                                if len(eval_dump["explanation"]) > 500
+                                else eval_dump["explanation"]
+                            )
+
+                        # Flatten the result structure
+                        flattened_eval = {
+                            "node_name": node_name,
+                            "evaluator_name": eval_name,
+                            **eval_dump,
+                        }
+                        evaluations.append(flattened_eval)
 
                         # Centrally aggregate token usage
                         eval_token_usage["prompt"] += eval_result.prompt_tokens or 0
@@ -151,47 +168,43 @@ class AsyncEvaluator:
                                 "traceback": traceback.format_exc(),
                             },
                         )
-                        # Record the failure for this specific sub-evaluation
-                        node_eval_results[eval_name] = {
-                            "error": str(e),
-                            "error_type": type(e).__name__,
-                            "status": "failed",
-                            "timestamp": datetime.utcnow().isoformat(),
-                        }
-                        # Continue to the next evaluator for this node
+                        # Record the failure in flattened structure
+                        evaluations.append(
+                            {
+                                "node_name": node_name,
+                                "evaluator_name": eval_name,
+                                "error": str(e),
+                                "error_type": type(e).__name__,
+                                "status": "failed",
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }
+                        )
                         continue
-
-                # Add the collected results for the node to the main evaluations dict
-                if node_eval_results:
-                    evaluations[node_name] = node_eval_results
 
             # Calculate evaluation latency
             eval_latency_ms = (time.monotonic() - eval_start_time) * 1000
 
+            # Calculate total latency
+            total_latency_ms = (
+                (datetime.utcnow() - conversation_flow.start_time).total_seconds()
+                * 1000
+                if conversation_flow and conversation_flow.start_time
+                else None
+            )
+
             # Calculate overall success based on all evaluation results
-            def check_all_evaluations_success(evaluations_dict):
+            def check_all_evaluations_success(evaluations_list):
                 """Check if all evaluation results have overall_success=True"""
-                if not evaluations_dict:
+                if not evaluations_list:
                     return False
 
-                for node_name, node_results in evaluations_dict.items():
-                    # Handle nested structure where node_results is a dict of evaluator results
-                    if isinstance(node_results, dict):
-                        for evaluator_name, evaluator_result in node_results.items():
-                            # Skip failed evaluations (they have error info instead of overall_success)
-                            if (
-                                "error" in evaluator_result
-                                or "status" in evaluator_result
-                            ):
-                                continue
-                            # Check if overall_success is False
-                            if evaluator_result.get("overall_success") is False:
-                                return False
-                    else:
-                        # Handle flat structure (fallback)
-                        if node_results.get("overall_success") is False:
-                            return False
-
+                for result in evaluations_list:
+                    # Skip failed evaluations
+                    if "error" in result or result.get("status") == "failed":
+                        continue
+                    # Check if overall_success is False
+                    if result.get("overall_success") is False:
+                        return False
                 return True
 
             overall_success = check_all_evaluations_success(evaluations)
@@ -202,6 +215,7 @@ class AsyncEvaluator:
                     "thread_id": thread_id,
                     "result": evaluations,
                     "eval_latency_ms": eval_latency_ms,
+                    "total_latency_ms": total_latency_ms,
                     "eval_prompt_tokens": eval_token_usage["prompt"],
                     "eval_completion_tokens": eval_token_usage["completion"],
                     "total_eval_tokens": eval_token_usage["prompt"]
@@ -216,12 +230,14 @@ class AsyncEvaluator:
                 run_id=conversation_flow.run_id,
                 thread_id=thread_id,
                 turn_index=conversation_flow.turn_index,
+                graph_version=conversation_flow.graph_version,
                 # Timestamps & Latency
                 timestamp_start=conversation_flow.start_time,
                 timestamp_end=datetime.utcnow(),
                 graph_latency_ms=conversation_flow.latency_ms,
                 time_to_first_token_ms=conversation_flow.time_to_first_token_ms,
                 evaluation_latency_ms=eval_latency_ms,
+                total_latency_ms=total_latency_ms,
                 # Core conversation data
                 query=query,
                 response=response,
@@ -268,6 +284,7 @@ class AsyncEvaluator:
                 if conversation_flow
                 else None,
                 evaluation_latency_ms=None,  # Could not be calculated due to error
+                total_latency_ms=None,  # Could not be calculated due to error
                 # Core conversation data
                 query=query,
                 response=response,

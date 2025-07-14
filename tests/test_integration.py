@@ -269,52 +269,67 @@ async def test_comprehensive_integration_flow(
 
 
 def verify_evaluation_result(result_data: dict, thread_id: str):
-    """Helper function to verify evaluation result structure and content."""
-    assert "evaluations" in result_data, "Result missing 'evaluations' dictionary"
+    """Helper function to verify evaluation result structure and content for the new flattened schema."""
+    assert "evaluations" in result_data, "Result missing 'evaluations' list"
     evaluations = result_data["evaluations"]
 
-    # For the "Why did you build this?" query, we expect specific evaluators
-    assert "relevance_check" in evaluations, "Missing relevance_check evaluation"
+    # Ensure evaluations is a list (flattened structure)
+    assert isinstance(
+        evaluations, list
+    ), "'evaluations' should be a list after flattening"
+
+    # Build helper mappings for quick lookup
+    evals_by_node = {}
+    for item in evaluations:
+        node = item.get("node_name")
+        if node:
+            evals_by_node.setdefault(node, []).append(item)
+
+    # We expect at least two nodes evaluated
+    assert "relevance_check" in evals_by_node, "Missing relevance_check evaluation"
     assert (
-        "generate_with_persona" in evaluations
+        "generate_with_persona" in evals_by_node
     ), "Missing generate_with_persona evaluation"
 
-    # Go one level deeper for relevance_check
-    relevance_eval = evaluations["relevance_check"]
-    if "evaluate_relevance_check" in relevance_eval:
-        relevance_eval = relevance_eval["evaluate_relevance_check"]
-    assert (
-        "classification" in relevance_eval
-    ), "Missing classification in relevance_check"
-    assert relevance_eval["classification"] in [
+    # -------------------------
+    # Validate relevance_check
+    # -------------------------
+    rel_evals = evals_by_node["relevance_check"]
+    # Prefer the evaluate_relevance_check evaluator if present
+    rel_eval = next(
+        (e for e in rel_evals if e.get("evaluator_name") == "evaluate_relevance_check"),
+        rel_evals[0],
+    )
+
+    assert "classification" in rel_eval, "Missing classification in relevance_check"
+    assert rel_eval["classification"] in [
         "IRRELEVANT",
         "RELEVANT",
-    ], f"Invalid classification: {relevance_eval['classification']}"
-    assert "format_valid" in relevance_eval, "Missing format_valid in relevance_check"
-    assert isinstance(
-        relevance_eval["format_valid"], bool
-    ), "format_valid should be boolean"
-    assert "explanation" in relevance_eval, "Missing explanation in relevance_check"
-    assert isinstance(
-        relevance_eval["explanation"], str
-    ), "explanation should be string"
+    ], f"Invalid classification: {rel_eval['classification']}"
+    assert "format_valid" in rel_eval, "Missing format_valid in relevance_check"
+    assert isinstance(rel_eval["format_valid"], bool), "format_valid should be boolean"
+    assert "explanation" in rel_eval, "Missing explanation in relevance_check"
+    assert isinstance(rel_eval["explanation"], str), "explanation should be string"
 
-    # Go one level deeper for generate_with_persona
-    persona_eval = evaluations["generate_with_persona"]
-    if "evaluate_generate_with_persona" in persona_eval:
-        persona_eval = persona_eval["evaluate_generate_with_persona"]
-    assert "persona_adherence" in persona_eval, "Missing persona_adherence"
-    assert isinstance(
-        persona_eval["persona_adherence"], bool
-    ), "persona_adherence should be boolean"
-    assert "follows_rules" in persona_eval, "Missing follows_rules"
-    assert isinstance(
-        persona_eval["follows_rules"], bool
-    ), "follows_rules should be boolean"
-    assert "faithfulness" in persona_eval, "Missing faithfulness"
-    assert isinstance(
-        persona_eval["faithfulness"], bool
-    ), "faithfulness should be boolean"
+    # -------------------------------
+    # Validate generate_with_persona
+    # -------------------------------
+    persona_evals = evals_by_node["generate_with_persona"]
+    persona_eval = next(
+        (
+            e
+            for e in persona_evals
+            if e.get("evaluator_name") == "evaluate_generate_with_persona"
+        ),
+        persona_evals[0],
+    )
+
+    for bool_field in ["persona_adherence", "follows_rules", "faithfulness"]:
+        assert bool_field in persona_eval, f"Missing {bool_field}"
+        assert isinstance(
+            persona_eval[bool_field], bool
+        ), f"{bool_field} should be boolean"
+
     assert "explanation" in persona_eval, "Missing explanation"
     assert isinstance(persona_eval["explanation"], str), "explanation should be string"
 
@@ -326,7 +341,7 @@ def verify_evaluation_result(result_data: dict, thread_id: str):
     return True
 
 
-@pytest.mark.integration
+@pytest.mark.skip(reason="Skipping local end-to-end test")
 @pytest.mark.asyncio
 async def test_local_end_to_end(
     http_client: httpx.AsyncClient,
@@ -665,7 +680,7 @@ async def test_local_end_to_end(
 # ============================================================================
 
 
-@pytest.mark.skip(reason="Skipping GCS end-to-end flow test")
+@pytest.mark.integration
 @pytest.mark.skipif(
     not all(
         os.getenv(k)
@@ -746,7 +761,6 @@ async def test_gcs_end_to_end(
     timeout = 45
     start_time = time.time()
     found_blobs = []
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
 
     gcs_client = _storage.Client()
     audit_bucket = gcs_client.bucket(gcs_audit_bucket_name)
@@ -759,13 +773,12 @@ async def test_gcs_end_to_end(
     while time.time() - start_time < timeout:
         # Search audit bucket for audit_request file
         if not audit_file_found:
-            audit_blobs = list(
-                audit_bucket.list_blobs(prefix=f"audit_data/date={date_str}")
-            )
+            audit_blobs = list(audit_bucket.list_blobs(prefix="audit_data/"))
             logger.debug(
-                f"Found {len(audit_blobs)} audit blobs with prefix audit_data/date={date_str}"
+                f"Found {len(audit_blobs)} audit blobs with prefix audit_data/"
             )
             for blob in audit_blobs:
+                # Add this line to filter by date and file prefix
                 if "audit_request" not in blob.name:
                     continue
                 try:
@@ -786,13 +799,12 @@ async def test_gcs_end_to_end(
 
         # Search results bucket for eval_result file
         if not result_file_found:
-            results_blobs = list(
-                results_bucket.list_blobs(prefix=f"eval_results/date={date_str}")
-            )
+            results_blobs = list(results_bucket.list_blobs(prefix="eval_results/"))
             logger.debug(
-                f"Found {len(results_blobs)} result blobs with prefix eval_results/date={date_str}"
+                f"Found {len(results_blobs)} result blobs with prefix eval_results/"
             )
             for blob in results_blobs:
+                # Add this line to filter by date and file prefix
                 if "eval_result" not in blob.name:
                     continue
                 try:

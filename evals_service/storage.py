@@ -306,11 +306,10 @@ class StorageManager:
         return batch
 
     async def _write_batch(self, items: List[Dict[str, Any]]) -> bool:
-        """Write a batch of items to storage with a partitioned path."""
+        """Write a batch of items to storage with a flattened path for BigQuery compatibility."""
         if not items:
             return True
 
-        # --- New Partitioning Logic ---
         # Extract run_id from the first item, handling different data structures
         first_item = items[0]
         run_id = "unknown_run_id"  # Default fallback
@@ -329,20 +328,19 @@ class StorageManager:
         if not run_id or run_id is None:
             run_id = "unknown_run_id"
 
-        # Get the current date for the partition
+        # Get the current date and timestamp
         utc_now = datetime.utcnow()
-        date_str = utc_now.strftime("%Y-%m-%d")
         timestamp = utc_now.strftime("%Y%m%d_%H%M%S_%f")
 
-        # Construct the Hive-style partitioned path
-        partition_path = f"date={date_str}/run_id={run_id}"
-        filename = f"{self.file_prefix}_{timestamp}.json"
+        # --- New Flattened Path Logic ---
+        # Embed date and run_id into the filename for BigQuery compatibility.
+        filename = f"{self.file_prefix}_{run_id}_{timestamp}.json"
 
         # Prepend the path prefix if it exists to create a top-level folder
         if self.path_prefix:
-            full_path = f"{self.path_prefix}/{partition_path}/{filename}"
+            full_path = f"{self.path_prefix}/{filename}"
         else:
-            full_path = f"{partition_path}/{filename}"
+            full_path = filename
         # --- End New Logic ---
 
         return await self.storage_backend.write_batch(items, full_path)

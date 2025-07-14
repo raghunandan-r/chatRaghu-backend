@@ -7,7 +7,7 @@ from config import config
 from utils.logger import logger
 from models import EnrichedNodeExecutionLog
 
-from .base import client, get_eval_prompt, get_system_message, get_main_graph_prompt
+from .base import client, get_eval_prompt, get_system_message
 from .judgements import LLMGenerateWithContextJudgement
 from .models import GenerateWithContextEval
 
@@ -26,7 +26,7 @@ async def evaluate_generate_with_context(
 
     model_output = node_execution.output.get("messages", [{}])[0].get("content", "")
     retrieved_docs = node_execution.retrieved_docs or []
-    original_system_prompt = get_main_graph_prompt("generate_with_retrieved_context")
+    # original_system_prompt = get_main_graph_prompt("generate_with_context")
     conversation_history = node_execution.input.get("conversation_history", [])
 
     logger.info(
@@ -51,7 +51,7 @@ async def evaluate_generate_with_context(
 
     eval_prompt = get_eval_prompt(
         "generate_with_context",
-        original_system_prompt=original_system_prompt,
+        # original_system_prompt=original_system_prompt,
         user_query=user_query,
         conversation_history=conversation_history,
         docs_text=docs_text,
@@ -100,7 +100,7 @@ async def evaluate_generate_with_context(
                 "context_relevance": judgement.context_relevance,
             },
             metadata={
-                "system_prompt": original_system_prompt,
+                # "system_prompt": original_system_prompt,
                 "llm_judgement": judgement.model_dump(),
                 "docs_scores": [doc.get("score", 0.0) for doc in retrieved_docs],
             },

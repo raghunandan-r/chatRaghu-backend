@@ -961,6 +961,7 @@ async def execute_stream_impl(
             thread_id=initial_state.thread_id,
             turn_index=turn_index,
             user_query=user_query,
+            graph_version="v1",
         )
 
         current_node = self.entry_point
@@ -978,6 +979,7 @@ async def execute_stream_impl(
 
             node = self.nodes[current_node]
             start_time = datetime.utcnow()
+            persona_node_log_added = False
 
             # Create node execution record
             node_log = EnrichedNodeExecutionLog(
@@ -996,7 +998,6 @@ async def execute_stream_impl(
                 system_prompt=None,
                 start_time=start_time,
                 end_time=None,  # Will be set after processing
-                graph_version="v1",
                 tags=[],
                 message_source="ai",
             )
@@ -1111,6 +1112,7 @@ async def execute_stream_impl(
                         )
 
                         conversation_flow.node_executions.append(node_log)
+                        persona_node_log_added = True
 
                         user_query = next(
                             (
@@ -1290,7 +1292,8 @@ async def execute_stream_impl(
 
             # Record routing decision
             node_log.output["next_edge"] = condition
-            conversation_flow.node_executions.append(node_log)
+            if not persona_node_log_added:
+                conversation_flow.node_executions.append(node_log)
 
             if condition in next_node:
                 current_node = next_node.get(condition)

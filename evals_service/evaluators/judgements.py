@@ -9,7 +9,7 @@ class LLMRelevanceJudgement(BaseModel):
 
     format_valid: bool = Field(
         ...,
-        description="True ONLY if the model output is exactly one of 'CONTEXTUAL', 'IRRELEVANT', or 'RELEVANT'.",
+        description="True ONLY if the model output is exactly one of 'IRRELEVANT', or 'RELEVANT'.",
     )
     classification_correct: bool = Field(
         ...,
