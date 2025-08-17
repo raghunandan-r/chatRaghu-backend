@@ -6,7 +6,7 @@ from config import config
 from utils.logger import logger
 from models import EnrichedNodeExecutionLog
 
-from .base import client, get_eval_prompt, get_system_message, get_main_graph_prompt
+from .base import client, get_eval_prompt, get_system_message
 from .judgements import LLMRelevanceJudgement
 from .models import RelevanceCheckEval
 
@@ -22,8 +22,8 @@ async def evaluate_relevance_check(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RelevanceCheckEval:
     """Evaluates the relevance_check node output using a structured LLM call."""
-
-    model_output = node_execution.output.get("messages", [{}])[0].get("content", "")
+    
+    model_output = node_execution.output.get("decision", "")
     conversation_history = node_execution.input.get("conversation_history", [])
     # original_system_prompt = get_main_graph_prompt("relevance_check")
 

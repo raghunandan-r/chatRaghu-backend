@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional
 from utils.logger import logger
-from models import ResponseMessage, EvaluationRequest
+from models import ConversationFlow
 from config import config
 
 
@@ -48,7 +48,7 @@ class DualQueueManager:
         self.results_storage = results_storage
         logger.info("Storage managers configured for DualQueueManager")
 
-    async def enqueue_audit(self, request: EvaluationRequest):
+    async def enqueue_audit(self, request: ConversationFlow):
         """Enqueue a request for immediate audit logging."""
         try:
             await self.audit_queue.put(request)
@@ -67,7 +67,7 @@ class DualQueueManager:
             )
             raise
 
-    async def enqueue_evaluation(self, message: ResponseMessage):
+    async def enqueue_evaluation(self, message: ConversationFlow):
         """Enqueue a response for evaluation processing."""
         try:
             await self.eval_queue.put(message)
@@ -131,18 +131,18 @@ class DualQueueManager:
                 if message is not None:
                     self.eval_queue.task_done()
 
-    async def _process_audit_request(self, request: EvaluationRequest):
+    async def _process_audit_request(self, request: ConversationFlow):
         """Process an audit request and store it."""
         try:
             logger.info(
                 "Processing audit request",
                 extra={
                     "thread_id": request.thread_id,
-                    "node_count": len(request.conversation_flow.node_executions),
+                    "node_count": len(request.node_executions),
                 },
             )
-
-            # Store the audit request if storage manager is available
+            
+            # Store the audit request if storage manager is available, picked up by StorageManager._storage_worker()
             if self.audit_storage:
                 await self.audit_storage.queue.put(request)
                 logger.info(
@@ -159,29 +159,23 @@ class DualQueueManager:
             )
             raise
 
-    async def _process_evaluation_request(self, message: ResponseMessage, evaluator):
+    async def _process_evaluation_request(self, message: ConversationFlow, evaluator):
         """Process an evaluation request and store the result."""
         try:
             logger.info(
                 "Processing evaluation request",
                 extra={
                     "thread_id": message.thread_id,
-                    "node_count": len(message.conversation_flow.node_executions),
+                    "node_count": len(message.node_executions),
                     "execution_path": [
                         f"{node.node_name}({node.output.get('next_edge', 'N/A')})"
-                        for node in message.conversation_flow.node_executions
+                        for node in message.node_executions
                     ],
                 },
             )
 
             # Perform the evaluation
-            evaluation_result = await evaluator.evaluate_response(
-                thread_id=message.thread_id,
-                query=message.query,
-                response=message.response,
-                retrieved_docs=message.retrieved_docs,
-                conversation_flow=message.conversation_flow,
-            )
+            evaluation_result = await evaluator.evaluate_response(message)
 
             # Store the evaluation result if storage manager is available
             if self.results_storage:
@@ -203,21 +197,14 @@ class DualQueueManager:
                 extra={"thread_id": message.thread_id},
             )
         except Exception as e:
-            if message.retry_count < message.max_retries:
-                message.retry_count += 1
-                await self.eval_queue.put(message)
-                logger.warning(
-                    f"Evaluation failed, retrying {message.retry_count}/{message.max_retries}",
-                    extra={"thread_id": message.thread_id, "error": str(e)},
-                )
-            else:
-                logger.error(
-                    f"Evaluation failed after {message.max_retries} retries",
-                    extra={
-                        "error": str(e),
-                        "message_data": message.model_dump(mode="json"),
-                    },
-                )
+
+            logger.error(
+                f"Evaluation failed after in queue_manager._process_evaluation_request",
+                extra={
+                    "error": str(e),
+                    "message_data": message.model_dump(mode="json"),
+                },
+            )
 
     async def start(self, evaluator):
         """Start both queue workers."""

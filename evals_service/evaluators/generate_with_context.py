@@ -24,7 +24,7 @@ async def evaluate_generate_with_context(
 ) -> GenerateWithContextEval:
     """Evaluates the generate_with_context node output using a structured LLM call."""
 
-    model_output = node_execution.output.get("messages", [{}])[0].get("content", "")
+    model_output = node_execution.output.get("text", "")
     retrieved_docs = node_execution.retrieved_docs or []
     # original_system_prompt = get_main_graph_prompt("generate_with_context")
     conversation_history = node_execution.input.get("conversation_history", [])

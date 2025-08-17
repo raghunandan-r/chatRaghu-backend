@@ -12,17 +12,12 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import time
 import logging
-
-# from evals.evaluators import RaghuPersonaEvaluator, RelevanceEvaluator
 import uvicorn
 import traceback
 from graph import (
-    init_example_selector,
     MessagesState,
     HumanMessage,
     AIMessage,
-    streaming_graph,
-    set_queue_manager,
 )
 from utils.logger import logger
 import sentry_sdk
@@ -30,6 +25,10 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from evaluation_client import get_evaluation_client, close_evaluation_client
 from evaluation_queue_manager import EvaluationQueueManager
+
+from openai import AsyncOpenAI
+import instructor
+from graph.assembly import create_engine
 
 # Load .env files only if they exist
 if os.path.exists(".env"):
@@ -86,7 +85,7 @@ class ErrorResponse(BaseModel):
     error: str
 
 
-# Global storage (consider using Redis for production)
+# TODO: consider using Redis for production and removing this
 class Storage:
     api_key_usage: Dict[str, List[datetime]] = {}
     request_history: Dict[str, List[datetime]] = {}
@@ -127,16 +126,23 @@ async def lifespan(app: FastAPI):
     # Startup
     cleanup_task = asyncio.create_task(Storage.cleanup_old_entries())
 
+
     # Initialize evaluation client
     app.state.evaluation_client = await get_evaluation_client()
 
     # Initialize queue manager for graph
     app.state.queue_manager = EvaluationQueueManager()
-    set_queue_manager(app.state.queue_manager)
+    
+    instructor_client = instructor.from_openai(
+        AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    )
+    # GraphEngine
+    engine = create_engine(instructor_client=instructor_client, queue_manager=app.state.queue_manager)
+    app.state.engine = engine
+
 
     # Start services
     await app.state.queue_manager.start()
-    await init_example_selector()
 
     yield
 
@@ -261,74 +267,17 @@ async def logging_middleware(request: Request, call_next):
     return response
 
 
-@asynccontextmanager
-async def manage_stream_generator(stream_gen, thread_id: str):
-    """Context manager to properly handle stream generator lifecycle"""
-    try:
-        yield stream_gen
-    finally:
-        try:
-            # Don't rely on _is_closing attribute
-            if hasattr(stream_gen, "aclose"):
-                try:
-                    await asyncio.wait_for(stream_gen.aclose(), timeout=5)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Timeout during generator cleanup",
-                        extra={"thread_id": thread_id},
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Error during generator cleanup: {str(e)}",
-                        extra={"thread_id": thread_id},
-                    )
-        except Exception as e:
-            logger.warning(
-                f"Final cleanup error: {str(e)}", extra={"thread_id": thread_id}
-            )
+async def stream_chunks(stream_gen,  request: Request):
+    async for chunk, meta in stream_gen:
+        if chunk.type == "content" and chunk.content:
+            for line in str(chunk.content).split('\n'):
+                yield f"data: {line}\n"
+            yield "\n"
+            await asyncio.sleep(0) # immediate flush
 
-
-async def stream_chunks(
-    stream_gen, thread_id: str, start_time: float, request: Request
-):
-    chunk_count = 0
-    last_chunk_time = start_time
-
-    try:
-        async for chunk, metadata in stream_gen:
-            current_time = time.time()
-            chunk_count += 1
-
-            # Handle StreamingResponse objects
-            if hasattr(chunk, "type") and chunk.type == "content" and chunk.content:
-                yield json.dumps(
-                    {"choices": [{"delta": {"content": chunk.content}}]}
-                ) + "\n"
-                last_chunk_time = current_time
-            # Handle AIMessage objects (for backward compatibility)
-            elif (
-                isinstance(chunk, AIMessage)
-                and metadata.get("node") == "generate_with_persona"
-            ):
-                yield json.dumps(
-                    {"choices": [{"delta": {"content": chunk.content}}]}
-                ) + "\n"
-                last_chunk_time = current_time
-
-    except Exception as e:
-        logger.error(
-            "[STREAM_DEBUG] Stream error",
-            extra={
-                "thread_id": thread_id,
-                "elapsed_time": time.time() - start_time,
-                "chunks_processed": chunk_count,
-                "last_chunk_age": time.time() - last_chunk_time,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": traceback.format_exc(),
-            },
-        )
-        raise
+        elif chunk.type == "end":
+            yield "data: [DONE]\n\n"
+            break
 
 
 @app.post(
@@ -346,7 +295,7 @@ async def chat(
     request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)
 ):
     """Main chat endpoint handler"""
-    thread_id = chat_request.messages[0].thread_id if chat_request.messages else ""
+    thread_id = chat_request.messages[0].thread_id if chat_request.messages else f"anon_{int(time.time())}_{os.urandom(4).hex()}"  # Generate anonymous thread ID
 
     try:
         await check_thread_rate_limit(thread_id)
@@ -363,22 +312,22 @@ async def chat(
             - 1
         )  # -1 because we just added one
 
-        stream_gen = streaming_graph.execute_stream(initial_state, run_id, turn_index)
+        stream_gen = request.app.state.engine.execute_stream(initial_state, run_id, turn_index)
 
         return FastAPIStreamingResponse(
-            content=stream_chunks(stream_gen, thread_id, time.time(), request),
+            content=stream_chunks(stream_gen, request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Vercel-AI-Data-Stream": "v1",
-                "Access-Control-Allow-Headers": "*",
+                "X-Accel-Buffering": "no",
             },
         )
 
     except Exception as e:
         logger.error(
-            "[GRAPH_DEBUG] Setup error",
+            "Setup error",
             extra={
                 "thread_id": thread_id,
                 "error": str(e),

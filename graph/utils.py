@@ -6,10 +6,12 @@ and few-shot example formatting.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
 
+from utils.logger import logger
+from .models import MessagesState, HumanMessage, AIMessage, ToolMessage
 
 TEMPLATES_PATH = Path(__file__).parent / "prompt_templates.json"
 
@@ -19,13 +21,44 @@ def _load_templates() -> Dict[str, Any]:
     with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def build_conversation_history(
+    state: MessagesState, max_history=8, include_tool_content=True
+):
+    recent_messages = (
+        state.messages[-max_history * 2 :]
+        if len(state.messages) > max_history * 2
+        else state.messages
+    )
+    openai_messages = []
+    
+    for msg in recent_messages:
+        if isinstance(msg, HumanMessage):
+            openai_messages.append({"role": "user", "content": msg.content})
+            
+        elif isinstance(msg, AIMessage):
+            openai_messages.append({"role": "assistant", "content": msg.content})
+        
+        elif (include_tool_content and isinstance(msg, ToolMessage) and msg.tool_name == "retrieve"):
+            # Only include the retrieved content, not the tool call details            
+            if isinstance(msg.output, list) and all(
+                hasattr(item, "content") and hasattr(item, "score") for item in msg.output
+            ):
+                openai_messages.append({"role": "assistant", "content": "\n\n".join(
+                    f"Content: {item.content} (Score: {item.score:.2f})" for item in msg.output
+                )})
+            elif isinstance(msg.output, str):
+                openai_messages.append({"role": "assistant", "content": msg.output})
+            else:
+                openai_messages.append({"role": "assistant", "content": str(msg.output)})
+    
+    logger.info("DEBUG: openai_messages", extra={"openai_messages": openai_messages})
+    return openai_messages
 
-def render_generate_answer(
+
+def render_prompt_generate_answer(
     mode: str, 
     *, 
     user_query: str, 
-    docs_content: str = "", 
-    recent_history: str = "", 
     deflection_category: str = ""
 ) -> str:
     """
@@ -34,8 +67,6 @@ def render_generate_answer(
     Args:
         mode: One of "deflection", "rag", "history"
         user_query: The user's query
-        docs_content: Retrieved documents (for rag mode)
-        recent_history: Recent conversation history (for history mode)
         deflection_category: Classification category (for deflection mode)
     
     Returns:
@@ -46,12 +77,10 @@ def render_generate_answer(
     base = ga["base_system"]
     partial = ga["partials"][mode]
     
-    current_date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    current_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     content_vars = {
         "current_date_str": current_date_str,
         "user_query": user_query,
-        "docs_content": docs_content,
-        "recent_history": recent_history,
         "deflection_category": deflection_category,
     }
     
@@ -106,7 +135,7 @@ def render_simple_template(template_name: str, **variables) -> str:
     else:
         raise KeyError(f"Template {template_name} does not have a system_message field")
 
-
+# TODO: this isnt used anywhere. remove?
 def validate_templates() -> None:
     """
     Validate that all required templates and fields exist.

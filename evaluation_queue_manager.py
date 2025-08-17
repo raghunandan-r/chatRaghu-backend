@@ -8,7 +8,7 @@ the separate evaluation service instead of handling evaluations locally.
 import asyncio
 from typing import Optional
 from utils.logger import logger
-from evaluation_models import ResponseMessage
+from evaluation_models import ConversationFlow
 from evaluation_client import get_evaluation_client
 
 
@@ -20,7 +20,7 @@ class EvaluationQueueManager:
         self._worker_task: Optional[asyncio.Task] = None
         self._evaluation_client = None
 
-    async def enqueue_response(self, message: ResponseMessage):
+    async def enqueue_response(self, message: ConversationFlow):
         """Enqueue a response for evaluation via the evaluation service"""
         await self.queue.put(message)
         logger.info(
@@ -28,7 +28,7 @@ class EvaluationQueueManager:
             extra={"thread_id": message.thread_id, "queue_size": self.queue.qsize()},
         )
 
-    async def _process_message(self, message: ResponseMessage):
+    async def _process_message(self, message: ConversationFlow):
         """Process a message by sending it to the evaluation service"""
         try:
             if self._evaluation_client is None:
@@ -38,18 +38,12 @@ class EvaluationQueueManager:
                 "Sending conversation flow to evaluation service",
                 extra={
                     "thread_id": message.thread_id,
-                    "node_count": len(message.conversation_flow.node_executions),
+                    "node_count": len(message.node_executions),
                 },
             )
 
             # Send to evaluation service
-            await self._evaluation_client.evaluate_conversation_async(
-                thread_id=message.thread_id,
-                query=message.query,
-                response=message.response,
-                conversation_flow=message.conversation_flow,
-                retrieved_docs=message.retrieved_docs,
-            )
+            await self._evaluation_client.evaluate_conversation_async(message)
 
             logger.info(
                 "Successfully sent evaluation request to service",
@@ -57,18 +51,10 @@ class EvaluationQueueManager:
             )
 
         except Exception as e:
-            if message.retry_count < message.max_retries:
-                message.retry_count += 1
-                await self.queue.put(message)
-                logger.warning(
-                    f"Evaluation service request failed, retrying {message.retry_count}/{message.max_retries}",
-                    extra={"thread_id": message.thread_id, "error": str(e)},
-                )
-            else:
-                logger.error(
-                    f"Evaluation service request failed after {message.max_retries} retries",
-                    extra={"error": str(e), "thread_id": message.thread_id},
-                )
+            logger.error(
+                f"Evaluation service request failed, RETRYING!", # TODO: retry only if its an LLM API call error
+                extra={"error": str(e), "thread_id": message.thread_id},
+            )
 
     async def _worker(self):
         """Background worker to process evaluation requests"""

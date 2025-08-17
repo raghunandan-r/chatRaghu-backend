@@ -1,29 +1,7 @@
+from re import A
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Literal, Any
 from datetime import datetime
-
-
-class NodeMessage(BaseModel):
-    """Represents a message with its associated node context"""
-
-    content: str
-    node_name: str
-    message_type: Literal["input", "output"]
-    message_source: Literal[
-        "human", "ai"
-    ] = "ai"  # Track if message is human or AI generated
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-
-class NodeExecution(BaseModel):
-    """Tracks execution details of a single node"""
-
-    node_name: str
-    input: Dict[str, Any] = Field(default_factory=dict)
-    output: Dict[str, Any] = Field(default_factory=dict)
-    messages: List[NodeMessage] = Field(default_factory=list)
-    next_edge: Optional[str] = None
-    execution_time: datetime = Field(default_factory=datetime.utcnow)
 
 
 class EnrichedNodeExecutionLog(BaseModel):
@@ -74,7 +52,7 @@ class EvaluationRequest(BaseModel):
     thread_id: str
     query: str
     response: str
-    retrieved_docs: Optional[List[Dict[str, str]]] = None
+    retrieved_docs: Optional[List[Dict[str, Any]]] = None
     conversation_flow: ConversationFlow
 
     class Config:
@@ -102,7 +80,7 @@ class EvaluationResult(BaseModel):
     # Core conversation data
     query: str
     response: str
-    retrieved_docs: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+    retrieved_docs: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
     # Token Counts
     graph_total_prompt_tokens: Optional[int] = None
@@ -129,14 +107,3 @@ class RetryConfig(BaseModel):
     max_retries: int = 3
     delay_seconds: int = 5
     backoff_factor: float = 2.0
-
-
-class ResponseMessage(BaseModel):
-    thread_id: str
-    query: str
-    response: str
-    retrieved_docs: Optional[List[Dict]] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    retry_count: int = 0
-    max_retries: int = 3
-    conversation_flow: ConversationFlow

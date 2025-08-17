@@ -9,8 +9,7 @@ import asyncio
 
 # Import evaluation modules
 from models import (
-    EvaluationRequest,
-    ResponseMessage,
+    ConversationFlow,
 )
 from queue_manager import DualQueueManager
 from run_evals import AsyncEvaluator
@@ -144,7 +143,7 @@ class EvaluationResponse(BaseModel):
 
 
 async def run_and_queue_evaluation(
-    request: EvaluationRequest,
+    request: ConversationFlow,
     queue_manager: DualQueueManager,
 ):
     """Wrapper function to run evaluation and queue the result."""
@@ -153,21 +152,8 @@ async def run_and_queue_evaluation(
         extra={"thread_id": request.thread_id},
     )
     try:
-        # Create response message for evaluation
-        response_message = ResponseMessage(
-            thread_id=request.thread_id,
-            query=request.query,
-            response=request.response,
-            retrieved_docs=request.retrieved_docs,
-            conversation_flow=request.conversation_flow,
-        )
 
-        # Queue for evaluation processing
-        logger.info(
-            f"EVAL_APP_LOG: Enqueueing for evaluation processing for thread_id={request.thread_id}",
-            extra={"thread_id": request.thread_id},
-        )
-        await queue_manager.enqueue_evaluation(response_message)
+        await queue_manager.enqueue_evaluation(request)
         logger.info(
             f"EVAL_APP_LOG: Successfully enqueued for evaluation for thread_id={request.thread_id}",
             extra={"thread_id": request.thread_id},
@@ -182,7 +168,7 @@ async def run_and_queue_evaluation(
 
 @app.post("/evaluate", response_model=EvaluationResponse, status_code=202)
 async def evaluate_conversation(
-    request: EvaluationRequest,
+    request: ConversationFlow,
     background_tasks: BackgroundTasks,
 ):
     """
@@ -196,7 +182,7 @@ async def evaluate_conversation(
             f"EVAL_APP_LOG: Received evaluation request for thread_id={request.thread_id}",
             extra={
                 "thread_id": request.thread_id,
-                "node_count": len(request.conversation_flow.node_executions),
+                "node_count": len(request.node_executions),
             },
         )
 

@@ -90,7 +90,7 @@ class RetrieveTool(Tool):
     )
 
     @track(capture_input=False)
-    async def execute(self, query: str) -> tuple[str, List[RetrievalResult]]:
+    async def execute(self, query: str) -> List[RetrievalResult]:
         try:
             logger.info(
                 "Starting retrieval",
@@ -109,15 +109,12 @@ class RetrieveTool(Tool):
                 threshold = max(0.7, best_score * 0.9)
 
                 # Process and filter results in a single pass
-                processed_results = []
-                serialized_chunks = []
+                processed_results = []                
 
                 for doc, score in doc_score_pairs:
                     if score >= threshold:
                         processed_content = preprocess_text(doc["page_content"])
-                        serialized_chunks.append(
-                            f"Content: {processed_content} (Score: {score:.2f})"
-                        )
+                
                         processed_results.append(
                             RetrievalResult(
                                 content=processed_content,
@@ -132,9 +129,9 @@ class RetrieveTool(Tool):
                     output={"docs": processed_results},
                 )
 
-                return "\n\n".join(serialized_chunks), processed_results
+                return processed_results
 
-            return "", []
+            return []
 
         except Exception as e:
             logger.error("Retrieval failed", extra={"error": str(e)})

@@ -1,5 +1,5 @@
 # Stage 1: Use a specific and smaller base image
-FROM python:3.9-slim-bullseye
+FROM python:3.11-slim
 
 # Set the working directory
 WORKDIR /app
@@ -24,7 +24,5 @@ COPY --chown=appuser:appuser . .
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Command to run the application
-# Note: The original Dockerfile used port 8000, but the compose file maps 3000.
-# The app.py runs on 3000 when executed directly. Sticking to 3000.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
+# Command to run the application (use env vars for Railway/IPv6 compatibility)
+CMD ["sh", "-c", "uvicorn app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-3000}"]

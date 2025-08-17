@@ -40,13 +40,3 @@ class GenerateWithContextEval(NodeEvaluation):
     handles_irrelevance: bool
     context_relevance: bool
     explanation: str
-
-
-class GenerateWithPersonaEval(NodeEvaluation):
-    persona_adherence: bool
-    follows_rules: bool
-    faithfulness: bool
-    answer_relevance: bool
-    handles_irrelevance: bool
-    context_relevance: bool
-    explanation: str

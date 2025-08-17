@@ -5,7 +5,7 @@ Main evaluation runner for processing node outputs.
 import backoff
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
@@ -76,11 +76,7 @@ class AsyncEvaluator:
     )
     async def evaluate_response(
         self,
-        thread_id: str,
-        query: str,
-        response: str,
-        retrieved_docs: Optional[List[Dict[str, str]]] = None,
-        conversation_flow: Optional[ConversationFlow] = None,
+        conversation_flow: ConversationFlow,
     ) -> EvaluationResult:
         """
         Evaluates a complete conversation flow through all executed nodes.
@@ -90,9 +86,9 @@ class AsyncEvaluator:
             eval_start_time = time.monotonic()
 
             logger.info(
-                f"EVALUATOR_START: Starting evaluation for thread_id={thread_id}",
+                f"EVALUATOR_START: Starting evaluation for thread_id={conversation_flow.thread_id}",
                 extra={
-                    "thread_id": thread_id,
+                    "thread_id": conversation_flow.thread_id,
                     "node_count": len(conversation_flow.node_executions)
                     if conversation_flow
                     else 0,
@@ -109,8 +105,8 @@ class AsyncEvaluator:
 
                 if not evaluator_functions:
                     logger.info(
-                        f"EVALUATOR_NODE_SKIPPED: No evaluators registered for node '{node_name}' for thread_id={thread_id}",
-                        extra={"thread_id": thread_id, "node_name": node_name},
+                        f"EVALUATOR_NODE_SKIPPED: No evaluators registered for node '{node_name}' for thread_id={conversation_flow.thread_id}",
+                        extra={"thread_id": conversation_flow.thread_id, "node_name": node_name},
                     )
                     continue
 
@@ -118,7 +114,7 @@ class AsyncEvaluator:
                     eval_name = evaluator_func.__name__
                     try:
                         eval_result = await evaluator_func(
-                            node_execution=node_execution, user_query=query
+                            node_execution=node_execution, user_query=conversation_flow.user_query
                         )
 
                         # Get the evaluation result as dict
@@ -148,20 +144,11 @@ class AsyncEvaluator:
                             eval_result.completion_tokens or 0
                         )
 
-                        logger.info(
-                            f"EVALUATOR_SUB_EVAL_PROCESSED: Processed evaluator '{eval_name}' for node '{node_name}'",
-                            extra={
-                                "thread_id": thread_id,
-                                "node_name": node_name,
-                                "evaluator": eval_name,
-                            },
-                        )
-
                     except Exception as e:
                         logger.error(
                             f"EVALUATOR_SUB_EVAL_FAILED: Evaluator '{eval_name}' failed for node '{node_name}'",
                             extra={
-                                "thread_id": thread_id,
+                                "thread_id": conversation_flow.thread_id,
                                 "node_name": node_name,
                                 "evaluator": eval_name,
                                 "error": str(e),
@@ -176,7 +163,7 @@ class AsyncEvaluator:
                                 "error": str(e),
                                 "error_type": type(e).__name__,
                                 "status": "failed",
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                             }
                         )
                         continue
@@ -186,7 +173,7 @@ class AsyncEvaluator:
 
             # Calculate total latency
             total_latency_ms = (
-                (datetime.utcnow() - conversation_flow.start_time).total_seconds()
+                (datetime.now(timezone.utc) - conversation_flow.start_time).total_seconds()
                 * 1000
                 if conversation_flow and conversation_flow.start_time
                 else None
@@ -210,9 +197,9 @@ class AsyncEvaluator:
             overall_success = check_all_evaluations_success(evaluations)
 
             logger.info(
-                f"EVALUATOR_SUCCESS: Evaluation completed for thread_id={thread_id}",
+                f"EVALUATOR_SUCCESS: Evaluation completed for thread_id={conversation_flow.thread_id}",
                 extra={
-                    "thread_id": thread_id,
+                    "thread_id": conversation_flow.thread_id,
                     "result": evaluations,
                     "eval_latency_ms": eval_latency_ms,
                     "total_latency_ms": total_latency_ms,
@@ -228,20 +215,20 @@ class AsyncEvaluator:
             return EvaluationResult(
                 # Identifiers from the graph flow
                 run_id=conversation_flow.run_id,
-                thread_id=thread_id,
+                thread_id=conversation_flow.thread_id,
                 turn_index=conversation_flow.turn_index,
                 graph_version=conversation_flow.graph_version,
                 # Timestamps & Latency
                 timestamp_start=conversation_flow.start_time,
-                timestamp_end=datetime.utcnow(),
+                timestamp_end=datetime.now(timezone.utc),
                 graph_latency_ms=conversation_flow.latency_ms,
                 time_to_first_token_ms=conversation_flow.time_to_first_token_ms,
                 evaluation_latency_ms=eval_latency_ms,
                 total_latency_ms=total_latency_ms,
                 # Core conversation data
-                query=query,
-                response=response,
-                retrieved_docs=retrieved_docs,
+                query=conversation_flow.user_query,
+                response=conversation_flow.final_response,
+                retrieved_docs=conversation_flow.node_executions[-1].retrieved_docs,
                 # Token Counts
                 graph_total_prompt_tokens=conversation_flow.total_prompt_tokens,
                 graph_total_completion_tokens=conversation_flow.total_completion_tokens,
@@ -259,9 +246,9 @@ class AsyncEvaluator:
         except Exception as e:
             self._error_count += 1
             logger.error(
-                f"EVALUATOR_FAILURE: Evaluation failed for thread_id={thread_id}",
+                f"EVALUATOR_FAILURE: Evaluation failed for thread_id={conversation_flow.thread_id}",
                 extra={
-                    "thread_id": thread_id,
+                    "thread_id": conversation_flow.thread_id,
                     "error": str(e),
                     "traceback": traceback.format_exc(),
                 },
@@ -270,13 +257,13 @@ class AsyncEvaluator:
             return EvaluationResult(
                 # Identifiers - use defaults if conversation_flow is None
                 run_id=conversation_flow.run_id if conversation_flow else "unknown",
-                thread_id=thread_id,
+                thread_id=conversation_flow.thread_id if conversation_flow else "unknown",
                 turn_index=conversation_flow.turn_index if conversation_flow else 0,
                 # Timestamps & Latency - use current time if conversation_flow is None
                 timestamp_start=conversation_flow.start_time
                 if conversation_flow
-                else datetime.utcnow(),
-                timestamp_end=datetime.utcnow(),
+                else datetime.now(timezone.utc),
+                timestamp_end=datetime.now(timezone.utc),
                 graph_latency_ms=conversation_flow.latency_ms
                 if conversation_flow
                 else None,
@@ -286,9 +273,9 @@ class AsyncEvaluator:
                 evaluation_latency_ms=None,  # Could not be calculated due to error
                 total_latency_ms=None,  # Could not be calculated due to error
                 # Core conversation data
-                query=query,
-                response=response,
-                retrieved_docs=retrieved_docs,
+                query=conversation_flow.user_query,
+                response=conversation_flow.final_response,
+                retrieved_docs=conversation_flow.node_executions[-1].retrieved_docs,
                 # Token Counts - use values from conversation_flow if available
                 graph_total_prompt_tokens=conversation_flow.total_prompt_tokens
                 if conversation_flow

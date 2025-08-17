@@ -22,7 +22,7 @@ class RoutingDecision(BaseModel):
 
 class DeflectionCategoryDecision(BaseModel):
     """Schema for deflection category classification LLM responses."""
-    category: Literal["OFFICIAL", "JEST", "HACK"]
+    decision: Literal["OFFICIAL", "JEST", "HACK"]
 
 
 class GenerationResponse(BaseModel):

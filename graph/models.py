@@ -30,29 +30,25 @@ class ToolMessage(BaseMessage):
 # State Models
 class MessagesState(BaseModel):
     messages: List[Union[HumanMessage, AIMessage, SystemMessage, ToolMessage]]
-    thread_id: Optional[str] = None  # Adding thread_id but keeping it optional
+    thread_id: str
+    meta: Dict[str, Any] = Field(default_factory=dict)
+    
+    @property
+    def user_query(self):
+        return next(
+            (msg.content for msg in reversed(self.messages) if isinstance(msg, HumanMessage)),
+            None,
+        )
 
     def update_thread_store(self):
         """Update global message store with current state"""
-        if self.thread_id:
-            THREAD_MESSAGE_STORE[self.thread_id] = self.messages[
-                -24:
-            ]  # Keep last 24 messages
+        THREAD_MESSAGE_STORE[self.thread_id] = self.messages[-24:]  # Keep last 24 messages
 
     @classmethod
-    def from_thread(cls, thread_id: str, new_message: HumanMessage) -> "MessagesState":
+    def from_thread(cls, thread_id: str, new_message: Union[AIMessage, ToolMessage, HumanMessage, SystemMessage]) -> "MessagesState":
         """Create state from thread history + new message"""
         messages = THREAD_MESSAGE_STORE.get(thread_id, [])
         return cls(messages=[*messages, new_message], thread_id=thread_id)
-
-
-class StreamingState(BaseModel):
-    """Tracks the state of a streaming response"""
-
-    buffer: str = ""
-    is_function_call: bool = False
-    function_name: Optional[str] = None
-    function_args: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamingResponse(BaseModel):

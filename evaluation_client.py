@@ -14,16 +14,6 @@ from utils.logger import logger
 from evaluation_models import ConversationFlow
 
 
-class EvaluationRequest(BaseModel):
-    """Request model for evaluation service"""
-
-    thread_id: str
-    query: str
-    response: str
-    retrieved_docs: Optional[List[Dict[str, str]]] = None
-    conversation_flow: Union[ConversationFlow, Dict[str, Any]]
-
-
 class EvaluationResponse(BaseModel):
     """Response model from evaluation service"""
 
@@ -82,11 +72,7 @@ class EvaluationClient:
 
     async def evaluate_conversation_async(
         self,
-        thread_id: str,
-        query: str,
-        response: str,
-        conversation_flow: Union[ConversationFlow, Dict[str, Any]],
-        retrieved_docs: Optional[List[Dict[str, str]]] = None,
+        conversation_flow: ConversationFlow,
     ) -> EvaluationResponse:
         """
         Submit a conversation for asynchronous evaluation.
@@ -108,20 +94,12 @@ class EvaluationClient:
             else:
                 node_count = len(conversation_flow.node_executions)
 
-            request_data = EvaluationRequest(
-                thread_id=thread_id,
-                query=query,
-                response=response,
-                retrieved_docs=retrieved_docs,
-                conversation_flow=conversation_flow,
-            )
-
             # Log the exact data being sent for debugging
-            request_json = request_data.model_dump(mode="json")
+            request_json = conversation_flow.model_dump(mode="json")
             logger.info(
                 "Sending evaluation request data",
                 extra={
-                    "thread_id": thread_id,
+                    "thread_id": conversation_flow.thread_id,
                     "request_data": request_json,
                     "node_count": node_count,
                 },
@@ -135,7 +113,7 @@ class EvaluationClient:
 
             logger.info(
                 "Successfully submitted evaluation request",
-                extra={"thread_id": thread_id, "success": result.success},
+                extra={"thread_id": conversation_flow.thread_id, "success": result.success},
             )
 
             return result
@@ -143,110 +121,9 @@ class EvaluationClient:
         except Exception as e:
             logger.error(
                 "Failed to submit evaluation request",
-                extra={"thread_id": thread_id, "error": str(e)},
+                extra={"thread_id": conversation_flow.thread_id, "error": str(e)},
             )
             raise
-
-    async def evaluate_conversation_sync(
-        self,
-        thread_id: str,
-        query: str,
-        response: str,
-        conversation_flow: Union[ConversationFlow, Dict[str, Any]],
-        retrieved_docs: Optional[List[Dict[str, str]]] = None,
-    ) -> EvaluationResponse:
-        """
-        Submit a conversation for synchronous evaluation.
-
-        Args:
-            thread_id: Unique identifier for the conversation
-            query: Original user query
-            response: Generated response
-            conversation_flow: Complete conversation flow data (ConversationFlow object or dict)
-            retrieved_docs: Retrieved documents (optional)
-
-        Returns:
-            Evaluation response with results
-        """
-        try:
-            # Handle both ConversationFlow objects and dictionaries
-            if isinstance(conversation_flow, dict):
-                node_count = len(conversation_flow.get("node_executions", []))
-            else:
-                node_count = len(conversation_flow.node_executions)
-
-            request_data = EvaluationRequest(
-                thread_id=thread_id,
-                query=query,
-                response=response,
-                retrieved_docs=retrieved_docs,
-                conversation_flow=conversation_flow,
-            )
-
-            # Log the exact data being sent for debugging
-            request_json = request_data.model_dump(mode="json")
-            logger.info(
-                "Sending synchronous evaluation request data",
-                extra={
-                    "thread_id": thread_id,
-                    "request_data": request_json,
-                    "node_count": node_count,
-                },
-            )
-
-            client = await self._get_client()
-            response = await client.post(
-                f"{self.base_url}/evaluate/sync", json=request_json
-            )
-            response.raise_for_status()
-
-            result = EvaluationResponse(**response.json())
-
-            logger.info(
-                "Successfully completed synchronous evaluation",
-                extra={"thread_id": thread_id, "success": result.success},
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(
-                "Failed to complete synchronous evaluation",
-                extra={"thread_id": thread_id, "error": str(e)},
-            )
-            raise
-
-    async def get_metrics(self) -> Dict[str, Any]:
-        """
-        Get evaluation service metrics.
-
-        Returns:
-            Service metrics information
-        """
-        try:
-            client = await self._get_client()
-            response = await client.get(f"{self.base_url}/metrics")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error("Failed to get metrics", extra={"error": str(e)})
-            raise
-
-
-class MockEvaluationClient:
-    async def evaluate_conversation_async(self, *args, **kwargs):
-        # Return a dummy response
-        return {
-            "thread_id": kwargs.get("thread_id", "mock"),
-            "success": True,
-            "evaluation_result": None,
-            "error": None,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-    async def close(self):
-        pass
-
 
 # Global evaluation client instance
 evaluation_client: Optional[EvaluationClient] = None
@@ -256,15 +133,12 @@ async def get_evaluation_client() -> EvaluationClient:
     """Get the global evaluation client instance"""
     global evaluation_client
     if evaluation_client is None:
-        if os.getenv("MOCK_EVAL_CLIENT", "false").lower() == "true":
-            evaluation_client = MockEvaluationClient()
-        else:
-            # Get configuration from environment
-            eval_service_url = os.getenv("EVALUATION_SERVICE_URL")
-            timeout = int(os.getenv("EVALUATION_SERVICE_TIMEOUT", "30"))
-            evaluation_client = EvaluationClient(
-                base_url=eval_service_url, timeout=timeout
-            )
+        # Get configuration from environment
+        eval_service_url = os.getenv("EVALUATION_SERVICE_URL")
+        timeout = int(os.getenv("EVALUATION_SERVICE_TIMEOUT", "30"))
+        evaluation_client = EvaluationClient(
+            base_url=eval_service_url, timeout=timeout
+        )
     return evaluation_client
 
 

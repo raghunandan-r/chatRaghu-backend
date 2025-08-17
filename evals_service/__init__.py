@@ -34,8 +34,8 @@ _sys.modules.setdefault("storage", _stg)
 from .models import EnrichedNodeExecutionLog, ConversationFlow
 from .evaluators.models import (
     RelevanceCheckEval,
-    GenerateWithPersonaEval,
     NodeEvaluation,
+    GenerateWithContextEval,
 )
 from .storage import (
     create_storage_backend,
@@ -53,7 +53,7 @@ __all__ = [
     "EnrichedNodeExecutionLog",
     "ConversationFlow",
     "RelevanceCheckEval",
-    "GenerateWithPersonaEval",
+    "GenerateWithContextEval",
     "NodeEvaluation",
     "EVALUATOR_REGISTRY",
     "create_storage_backend",
