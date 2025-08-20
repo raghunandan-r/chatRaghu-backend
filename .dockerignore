@@ -1,0 +1,43 @@
+# Git files
+.git
+.gitignore
+
+# Python virtual environment
+.venv
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and editor folders
+.idea/
+.vscode/
+.cursor/
+
+# Cache and log files
+.pytest_cache/
+.ruff_cache/
+.logfire/
+*.log
+
+# Secrets and environment files
+.env
+.env.*
+!/.env.example
+secrets/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Backup files
+*.bak
+*.swp

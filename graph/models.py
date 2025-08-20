@@ -1,37 +1,46 @@
 from typing import List, Dict, Optional, Any, Literal, Union
-from pydantic import BaseModel, Field
-
+from dataclasses import dataclass, field
 
 # Message Models
-class BaseMessage(BaseModel):
+@dataclass
+class BaseMessage:
     content: str
     type: str
 
 
-class HumanMessage(BaseMessage):
+@dataclass
+class HumanMessage:
+    content: str
     type: Literal["human"] = "human"
 
 
-class AIMessage(BaseMessage):
+@dataclass  
+class AIMessage:
+    content: str
     type: Literal["ai"] = "ai"
 
 
-class SystemMessage(BaseMessage):
+@dataclass
+class SystemMessage:
+    content: str
     type: Literal["system"] = "system"
 
 
-class ToolMessage(BaseMessage):
-    type: Literal["tool"] = "tool"
+@dataclass
+class ToolMessage:
+    content: str
     tool_name: str
     input: Dict[str, Any]
     output: Any
+    type: Literal["tool"] = "tool"
 
 
 # State Models
-class MessagesState(BaseModel):
+@dataclass
+class MessagesState:
     messages: List[Union[HumanMessage, AIMessage, SystemMessage, ToolMessage]]
     thread_id: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def user_query(self):
@@ -50,19 +59,20 @@ class MessagesState(BaseModel):
         messages = THREAD_MESSAGE_STORE.get(thread_id, [])
         return cls(messages=[*messages, new_message], thread_id=thread_id)
 
-
-class StreamingResponse(BaseModel):
+@dataclass
+class StreamingResponse:
     """Represents a chunk of a streaming response"""
-
-    content: Optional[str] = None
+    # All fields have defaults, so order doesn't matter, but group logically
     type: Literal["content", "function_call", "end", "usage"] = "content"
+    content: Optional[str] = None
     function_name: Optional[str] = None
     function_args: Optional[Dict[str, Any]] = None
     usage_stats: Optional[Dict[str, Any]] = None  # For token usage in streaming
 
 
-# Tool Models
-class Tool(BaseModel):
+# Tool Models  
+@dataclass
+class Tool:
     name: str
     description: str
     parameters: Dict[str, Any]
@@ -70,12 +80,18 @@ class Tool(BaseModel):
     async def execute(self, **kwargs) -> Any:
         raise NotImplementedError
 
-
-class RetrievalResult(BaseModel):
+@dataclass
+class RetrievalResult:
     content: str
     score: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> dict:
+        return {
+            'content' : self.content,
+            'score' : self.score,
+            'metadata' : self.metadata
+        }
 
 # Global thread message store
 THREAD_MESSAGE_STORE: Dict[

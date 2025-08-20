@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Protocol, Optional, Dict, Any
 from pathlib import Path
 from utils.logger import logger
@@ -277,26 +277,34 @@ class StorageManager:
         """Collects a batch of items from the queue with a timeout."""
         batch = []
         first_item = None
+
+        def _serialize_item(item):
+            """Convert item to dictionary for storage"""
+            if hasattr(item, 'to_dict'):
+                return item.to_dict()
+            elif hasattr(item, 'model_dump'):  # Legacy Pydantic fallback
+                return item.model_dump(mode="json")
+            elif isinstance(item, dict):
+                return item
+            else:
+                # Log warning for unexpected type
+                logger.warning(f"Unexpected item type for storage: {type(item)}")
+                return str(item)  # Fallback to string representation
+
+
+
         try:
             # Wait for the first item with timeout
             first_item = await asyncio.wait_for(
                 self.queue.get(), timeout=self.write_timeout
             )
-            batch.append(
-                first_item.model_dump(mode="json")
-                if hasattr(first_item, "model_dump")
-                else first_item
-            )
+            batch.append(_serialize_item(first_item))
 
             # Collect subsequent items until batch is full or queue is empty
             while len(batch) < self.batch_size:
                 try:
                     item = self.queue.get_nowait()
-                    batch.append(
-                        item.model_dump(mode="json")
-                        if hasattr(item, "model_dump")
-                        else item
-                    )
+                    batch.append(_serialize_item(item))
                 except asyncio.QueueEmpty:
                     break
 
@@ -336,7 +344,7 @@ class StorageManager:
             run_id = "unknown_run_id"
 
         # Get the current date and timestamp
-        utc_now = datetime.utcnow()
+        utc_now = datetime.now(timezone.utc)
         timestamp = utc_now.strftime("%Y%m%d_%H%M%S_%f")
 
         # --- New Flattened Path Logic ---

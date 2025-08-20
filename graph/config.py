@@ -15,7 +15,7 @@ class GraphConfig:
     
     # LLM settings
     default_model: str = "gpt-4o-mini" #"gpt-5-nano-2025-08-07" #
-    default_temperature: float = 1.0
+    default_temperature: float = 0.1 # 1.0
     
     # Retry settings
     llm_retry_count: int = 3

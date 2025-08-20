@@ -10,7 +10,6 @@ __pycache__/
 .platform/*
 plan_misc/*
 # Environment variables
-.dockerignore
 .env
 *.env
 .env.*

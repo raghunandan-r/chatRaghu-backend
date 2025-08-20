@@ -202,7 +202,7 @@ class DualQueueManager:
                 f"Evaluation failed after in queue_manager._process_evaluation_request",
                 extra={
                     "error": str(e),
-                    "message_data": message.model_dump(mode="json"),
+                    "message_data": message.to_dict(),
                 },
             )
 

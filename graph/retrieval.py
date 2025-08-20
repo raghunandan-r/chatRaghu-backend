@@ -2,8 +2,7 @@ import os
 import re
 import numpy as np
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
-
+from dataclasses import dataclass, field
 from pinecone import Pinecone
 from openai import AsyncOpenAI, OpenAI
 
@@ -35,17 +34,18 @@ def preprocess_text(text: str) -> str:
     return _whitespace_pattern.sub(" ", text).strip()
 
 
-class VectorStore(BaseModel):
+class VectorStore:
     """Vector store implementation using Pinecone"""
 
-    index_name: str
-    index: Optional[
-        Any
-    ] = None  # Change Index to Any since Pinecone's type isn't Pydantic compatible
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        self.index = pc.Index(self.index_name)
+    def __init__(self, index_name: str):
+        self.index_name = index_name
+        self._index = None
+    
+    @property
+    def index(self):
+        if self._index is None:
+            self._index = pc.Index(self.index_name)
+        return self._index
 
     async def similarity_search(
         self, query_embedding: List[float], k: int = 3
@@ -72,11 +72,12 @@ class VectorStore(BaseModel):
             logger.error("Vector store query failed", extra={"error": str(e)})
             raise
 
-
-class RetrieveTool(Tool):
+# TODO: parameters can be removed once dynamic few shot is totally descoped.
+@dataclass
+class RetrieveTool:
     name: str = "RETRIEVE"
     description: str = "Retrieve information related to a query"
-    parameters: Dict[str, Any] = Field(
+    parameters: Dict[str, Any] = field(
         default_factory=lambda: {
             "type": "object",
             "properties": {
@@ -144,7 +145,8 @@ class RetrieveTool(Tool):
         return response.data[0].embedding
 
 
-class ExampleSelector(BaseModel):
+@dataclass
+class ExampleSelector:
     examples: List[Dict[str, str]]
 
     @classmethod

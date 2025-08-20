@@ -152,7 +152,7 @@ def sample_evaluation_request() -> Dict[str, Any]:
             "thread_id": "test-thread-123",
             "query": "What is the weather like?",
             "response": "The weather is sunny today.",
-            "conversation_flow": conversation_flow.model_dump(mode="json"),
+            "conversation_flow": conversation_flow.to_dict(),
         }
     except Exception as e:
         logger.error(f"Failed to create sample evaluation request: {e}")

@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 import asyncio
@@ -133,7 +133,8 @@ app.add_middleware(
 )
 
 
-class EvaluationResponse(BaseModel):
+@dataclass
+class EvaluationResponse:
     """Response model for evaluation results"""
 
     thread_id: str
@@ -210,7 +211,7 @@ async def evaluate_conversation(
             thread_id=request.thread_id,
             success=True,
             message="Evaluation request accepted and is being processed.",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     except Exception as e:
@@ -246,7 +247,7 @@ async def health_check():
             "service": config.service.service_name,
             "version": config.service.service_version,
             "environment": config.service.environment,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "components": {
                 "evaluator": evaluator_health,
                 "queue_manager": queue_health,
@@ -257,7 +258,7 @@ async def health_check():
         }
     except Exception as e:
         logger.error("Health check failed", extra={"error": str(e)})
-        return {"status": "unhealthy", "error": str(e), "timestamp": datetime.utcnow()}
+        return {"status": "unhealthy", "error": str(e), "timestamp": datetime.now(timezone.utc)}
 
 
 @app.get("/metrics")
@@ -274,7 +275,7 @@ async def get_metrics():
                 "name": config.service.service_name,
                 "version": config.service.service_version,
                 "environment": config.service.environment,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             },
             "components": {
                 "evaluator": evaluator_metrics,
@@ -291,7 +292,7 @@ async def get_metrics():
         }
     except Exception as e:
         logger.error("Failed to get metrics", extra={"error": str(e)})
-        return {"error": str(e), "timestamp": datetime.utcnow()}
+        return {"error": str(e), "timestamp": datetime.now(timezone.utc)}
 
 
 @app.get("/config")

@@ -51,7 +51,7 @@ class GraphEngine:
             system_prompt=system_prompt,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-        ).model_dump(mode="json")
+        )
 
     async def _emit_final_audit_and_enqueue(self, *, conversation_flow):
 
@@ -86,6 +86,10 @@ class GraphEngine:
             turn_index=turn_index,
             user_query=initial_state.user_query,
             graph_version="v1",
+            latency_ms=None,
+            time_to_first_token_ms=None,
+            total_prompt_tokens=0,
+            total_completion_tokens=0,
         )
 
 
@@ -120,16 +124,16 @@ class GraphEngine:
                         final_text = new
                         
                         if not conversation_flow.time_to_first_token_ms:
-                            ttft_ms = (
+                            
+                            conversation_flow.time_to_first_token_ms = (
                                 datetime.now(timezone.utc) - conversation_flow.start_time
                             ).total_seconds() * 1000
-                            conversation_flow.time_to_first_token_ms = ttft_ms
                             logger.debug(
                                 "First token received for generate_answer",
                                 extra={
                                     "node": adapter.name,
                                     "thread_id": initial_state.thread_id,
-                                    "ttft_ms": ttft_ms,
+                                    "ttft_ms": conversation_flow.time_to_first_token_ms,
                                 },
                             )
 
@@ -170,7 +174,7 @@ class GraphEngine:
                 )
                 retriever = RetrieveTool()
                 results = await retriever.execute(query)
-                state.meta["retrieved_docs"] = [r.model_dump() for r in results]
+                state.meta["retrieved_docs"] = [r.to_dict() for r in results]
                 state.meta["context_mode"] = "rag"
             elif adapter.name == "query_or_respond" and decision == "SUFFICIENT":
                 state.meta["context_mode"] = "history"
@@ -192,7 +196,7 @@ class GraphEngine:
                 end_time=end_time,
                 system_prompt="\n".join([msg.get("content") for msg in messages if msg.get("role") == "system"]),
                 input={"conversation_history": [msg for msg in messages if msg.get("role") != "system"]},
-                output=validated.model_dump() if hasattr(validated, "model_dump") else {"text": validated.text},
+                output=validated.model_dump() if hasattr(validated, "model_dump") else {"text": getattr(validated, "text", str(validated))},
                 retrieved_docs=state.meta.get("retrieved_docs", []),
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -201,6 +205,7 @@ class GraphEngine:
             conversation_flow.total_prompt_tokens += prompt_tokens if prompt_tokens is not None else 0
             conversation_flow.total_completion_tokens += completion_tokens if completion_tokens is not None else 0
             conversation_flow.node_executions.append(node_log)
+            conversation_flow.latency_ms = (end_time - start_time).total_seconds() * 1000
 
 
             if not next_node or next_node == "END":

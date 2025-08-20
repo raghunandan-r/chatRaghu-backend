@@ -9,20 +9,40 @@ import os
 import httpx
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
-from pydantic import BaseModel
+from dataclasses import dataclass
 from utils.logger import logger
 from evaluation_models import ConversationFlow
 
 
-class EvaluationResponse(BaseModel):
+@dataclass
+class EvaluationResponse:
     """Response model from evaluation service"""
 
     thread_id: str
     success: bool
+    timestamp: datetime
+    message: str = ""
     evaluation_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    timestamp: datetime
-
+    
+  
+    @classmethod
+    def from_dict(cls, data: dict) -> 'EvaluationResponse':
+        """Create instance from dictionary, handling datetime parsing"""
+        if 'timestamp' in data and isinstance(data['timestamp'], str):
+            data['timestamp'] = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+        return cls(**data)
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        result = {
+            'thread_id': self.thread_id,
+            'success': self.success,
+            'timestamp': self.timestamp.isoformat(),
+            'evaluation_result': self.evaluation_result,
+            'error': self.error
+        }
+        return result
 
 class EvaluationClient:
     """Client for communicating with the evaluation service"""
@@ -95,7 +115,7 @@ class EvaluationClient:
                 node_count = len(conversation_flow.node_executions)
 
             # Log the exact data being sent for debugging
-            request_json = conversation_flow.model_dump(mode="json")
+            request_json = conversation_flow.to_dict()
             logger.info(
                 "Sending evaluation request data",
                 extra={
@@ -109,7 +129,7 @@ class EvaluationClient:
             response = await client.post(f"{self.base_url}/evaluate", json=request_json)
             response.raise_for_status()
 
-            result = EvaluationResponse(**response.json())
+            result = EvaluationResponse.from_dict(response.json())
 
             logger.info(
                 "Successfully submitted evaluation request",
