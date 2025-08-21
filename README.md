@@ -9,111 +9,114 @@ The application is split into two main services:
 1. **Main ChatRaghu Backend** (Port 3000): Handles chat requests, document retrieval, and conversation flow
 2. **Evaluation Service** (Port 8001): Processes conversation evaluations and quality metrics
 
+## Conversation Flow Architecture
+
+The main service implements a sophisticated graph-based conversation engine with multiple decision nodes:
+
+```mermaid
+graph TD
+    A[User Query] --> B[Relevance Check]
+    B -->|RELEVANT| C[Query or Respond]
+    B -->|IRRELEVANT| D[Deflection Categorizer]
+    
+    C -->|RETRIEVE| E[Document Retrieval]
+    C -->|SUFFICIENT| F[Generate Answer]
+    
+    E --> F
+    D --> F
+    
+    F --> G[Stream Response]
+    G --> H[Enqueue for Evaluation]
+    
+    H --> I[Message Queue]
+    I --> J[Evaluation Service]
+    J --> K[Multiple Evaluators]
+    K --> L[Store Results]
+    
+    style A fill:#e1f5fe
+    style B fill:#fff3e0
+    style C fill:#fff3e0
+    style D fill:#fff3e0
+    style F fill:#e8f5e8
+    style G fill:#e8f5e8
+    style H fill:#f3e5f5
+    style I fill:#f3e5f5
+    style J fill:#fff8e1
+    style K fill:#fff8e1
+    style L fill:#fff8e1
+```
+
+### Graph Node Details
+
+**Decision Nodes (Non-Streaming):**
+- **Relevance Check**: Classifies queries as RELEVANT/IRRELEVANT using structured LLM validation
+- **Query or Respond**: Decides between RETRIEVE (for new information) or SUFFICIENT (use conversation history)
+- **Deflection Categorizer**: For irrelevant queries, categorizes as OFFICIAL/JEST/HACK
+
+**Generation Node (Streaming):**
+- **Generate Answer**: Streams the final response based on context mode (RAG, history, or deflection)
+
+**Context Modes:**
+- **RAG**: Uses retrieved documents for context
+- **History**: Uses conversation history only
+- **Deflection**: Uses deflection category for appropriate response
+
 ## Services
 
 ### Main Service (`chatraghu-backend`)
 - FastAPI application handling chat requests
-- Document retrieval and RAG functionality
-- Conversation flow management
+- **Graph Engine**: Orchestrates conversation flow through decision nodes
+- **Adapters**: Modular components for each graph node (relevance, routing, generation)
+- **Document Retrieval**: RAG functionality with context-aware retrieval
+- **Message Queue**: Asynchronous evaluation enqueueing
 - Authentication and rate limiting
 
 ### Evaluation Service (`evaluation-service`)
 - Separate FastAPI service for evaluation processing
-- Asynchronous evaluation queue management
-- **NEW**: Modular and extensible evaluator architecture in the `evals-service/evaluators` package, allowing multiple evaluations per graph node (relevance, persona, etc.).
+- **Message Queue Integration**: Receives conversation flows via HTTP from main service
+- **Modular Evaluators**: Extensible evaluator architecture in `evals-service/evaluators` package
+- **Multiple Evaluations**: Per-graph-node evaluations (relevance, persona, etc.)
 - Results storage and metrics
-- Structured LLM validation using Instructor and Pydantic
-
-## Quick Start
-
-### Using Docker Compose (Recommended)
-
-1. **Clone and setup**:
-   ```bash
-   git clone <repository>
-   cd chatRaghu-backend
-   cp .env.example .env  # Create and configure your .env file
-   ```
-
-2. **Start both services**:
-   ```bash
-   docker-compose up --build
-   ```
-
-3. **For testing with real evaluation client**:
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.test.yml up --build
-   ```
-
-4. **Access services**:
-   - Main API: http://localhost:3000
-   - Evaluation Service: http://localhost:8001
-   - API Documentation: http://localhost:3000/docs
-   - Evaluation Service Docs: http://localhost:8001/docs
-
-### Development Setup
-
-1. **Main Service**:
-   ```bash
-   pip install -r requirements.txt
-   uvicorn app:app --host 0.0.0.0 --port 3000 --reload
-   ```
-
-2. **Evaluation Service**:
-   ```bash
-   cd evals-service
-   pip install -r requirements.txt
-   uvicorn app:app --host 0.0.0.0 --port 8001 --reload
-   ```
-
-## Environment Variables
-
-Create a `.env` file with the following variables:
-
-```env
-# API Keys
-OPENAI_API_KEY=your_openai_key
-PINECONE_API_KEY=your_pinecone_key
-VALID_API_KEYS=your_api_key1,your_api_key2
-
-# Service Configuration
-EVALUATION_SERVICE_URL=http://localhost:8001
-EVALUATION_SERVICE_TIMEOUT=30
-
-# Optional
-SENTRY_DSN=your_sentry_dsn
-OPIK_API_KEY=your_opik_key
-OPIK_WORKSPACE=your_workspace
-OPIK_PROJECT_NAME=your_project
-```
-
-## API Usage
-
-### Chat Endpoint
-```bash
-curl -X POST "http://localhost:3000/api/chat" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your_api_key" \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "Hello, how are you?"}
-    ]
-  }'
-```
-
-### Evaluation Service Health Check
-```bash
-curl "http://localhost:8001/health"
-```
+- **Structured LLM Validation**: Using Instructor and Pydantic for hallucination prevention
 
 ## Service Communication
 
-The main service communicates with the evaluation service using HTTP requests:
+### Message Queue System
+
+The main service communicates with the evaluation service using an **asynchronous message queue**:
+
+1. **Queue Manager**: `EvaluationQueueManager` maintains an in-memory `asyncio.Queue`
+2. **Background Worker**: Processes evaluation requests in the background
+3. **HTTP Communication**: Sends `ConversationFlow` objects to evaluation service via HTTP
+4. **Retry Logic**: Handles failures with automatic retries
+5. **Graceful Shutdown**: Clean cancellation on service shutdown
+
+**Queue Flow:**
+```
+Main Service → Queue Manager → Background Worker → HTTP Client → Evaluation Service
+```
+
+### API Endpoints
 
 - **Asynchronous Evaluation**: Main service sends evaluation requests to `/evaluate`
 - **Health Monitoring**: Regular health checks via `/health`
+- **Queue Management**: Internal queue operations for conversation flow processing
 
 ## Recent Updates
+
+### Graph Engine Enhancements
+
+**Modular Adapter Architecture**
+- **NEW**: Each graph node implemented as a separate adapter class
+- **NEW**: Structured decision schemas with Pydantic validation
+- **NEW**: Streaming and non-streaming node support
+- **NEW**: Context-aware routing based on LLM decisions
+
+**Enhanced Conversation Flow**
+- **NEW**: Multi-stage decision pipeline (relevance → routing → generation)
+- **NEW**: Dynamic context mode selection (RAG, history, deflection)
+- **NEW**: Comprehensive audit logging with token usage tracking
+- **NEW**: Opik integration for distributed tracing
 
 ### Evaluation Service Enhancements
 
@@ -123,8 +126,8 @@ The main service communicates with the evaluation service using HTTP requests:
 - **NEW**: Eliminated LLM hallucination through structured validation
 - **NEW**: Enhanced error handling and logging for evaluation processes
 
-**Updated Dependencies**
-- Upgraded to `openai==1.70.0` for Instructor compatibility
-- Added `instructor==1.9.0` for structured LLM responses
-- Updated `pydantic==2.8.2` and `pydantic-settings>=2.3.0`
-- Enhanced logging with `opik>=1.7.40`
+**Message Queue Integration**
+- **NEW**: Asynchronous conversation flow processing
+- **NEW**: Background worker with graceful shutdown
+- **NEW**: HTTP-based communication between services
+- **NEW**: Comprehensive error handling and retry logic
