@@ -16,6 +16,7 @@ plan_misc/*
 !.env.example
 docker-compose.test.yml
 evals_service/ISSUE_LOG.md
+.pre-commit-config.yaml
 
 *.pyc
 .python-version

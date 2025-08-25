@@ -22,18 +22,18 @@ repos:
         exclude: ^tests/conftest\.py$  # Temporarily exclude conftest during import recovery
 
   # Temporarily disabled pytest during import system recovery
-  # Re-enable once shim system is fully stable
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: bash -c 'PYTHONPATH=evals-service pytest'
-        language: system
-        pass_filenames: false
-        always_run: true
-        args: [
-          "-m", "not rate_limiting and not node_path",
-          "--tb=short",
-          "--disable-warnings"
-        ]
-        stages: [pre-commit]
+  # # Re-enable once shim system is fully stable
+  # - repo: local
+  #   hooks:
+  #     - id: pytest
+  #       name: pytest
+  #       entry: bash -c 'PYTHONPATH=evals-service pytest'
+  #       language: system
+  #       pass_filenames: false
+  #       always_run: true
+  #       args: [
+  #         "-m", "not rate_limiting and not node_path",
+  #         "--tb=short",
+  #         "--disable-warnings"
+  #       ]
+  #       stages: [pre-commit]

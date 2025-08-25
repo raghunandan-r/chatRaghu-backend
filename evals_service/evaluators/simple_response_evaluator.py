@@ -7,8 +7,8 @@ from utils.logger import logger
 from models import EnrichedNodeExecutionLog
 
 from .base import client, get_eval_prompt, get_system_message
-from .judgements import LLMRouterJudgement
-from .models import RouterEval
+from .judgements import LLMSimpleResponseJudgement
+from .models import SimpleResponseEval
 
 
 @backoff.on_exception(
@@ -18,33 +18,34 @@ from .models import RouterEval
     max_time=config.llm.openai_timeout_seconds,
 )
 @track(capture_input=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
-async def evaluate_router(
+async def evaluate_simple_response(
     node_execution: EnrichedNodeExecutionLog, user_query: str
-) -> RouterEval:
-    """Evaluates the router node output using a structured LLM call."""
+) -> SimpleResponseEval:
+    """Evaluates the SimpleResponse adapter output using a structured LLM call."""
 
-    model_output = node_execution.output.get("decision", "")
+    model_output = node_execution.output.get("text", "")
     conversation_history = node_execution.input.get("conversation_history", [])
-    # original_system_prompt = get_main_graph_prompt("relevance_check")
 
     logger.info(
-        "Starting router evaluation",
-        extra={"user_query": user_query, "model_output": model_output},
+        "Starting SimpleResponse evaluation",
+        extra={
+            "user_query": user_query,
+            "response_length": len(model_output),
+        },
     )
 
     eval_prompt = get_eval_prompt(
-        "router",
-        # original_system_prompt=original_system_prompt,
+        "simple_response",
         user_query=user_query,
         conversation_history=conversation_history,
         model_output=model_output,
     )
-    system_message = get_system_message("router")
+    system_message = get_system_message("simple_response")
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(
             model=config.llm.openai_model,
-            response_model=LLMRouterJudgement,
+            response_model=LLMSimpleResponseJudgement,
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": eval_prompt},
@@ -56,30 +57,46 @@ async def evaluate_router(
             completion.usage.completion_tokens if completion.usage else None
         )
 
+        overall_success = all(
+            [
+                judgement.response_appropriateness,
+                judgement.handles_irrelevance,
+            ]
+        )
+
         opik_context.update_current_span(
-            name="router",
-            input={"query": user_query, "history": conversation_history},
-            output={"classification": judgement.routing_correct},
+            name="simple_response",
+            input={
+                "query": user_query,
+                "response_length": len(model_output),
+            },
+            output={
+                "overall_success": overall_success,
+                "response_appropriateness": judgement.response_appropriateness,
+                "handles_irrelevance": judgement.handles_irrelevance,
+            },
             metadata={
-                "system_prompt": eval_prompt,
                 "llm_judgement": judgement.model_dump(),
             },
         )
+
         logger.info(
-            "EVAL_NODE_PROCESSED: Completed router evaluation",
+            "EVAL_NODE_PROCESSED: Completed SimpleResponse evaluation",
             extra={
                 "user_query": user_query,
-                "model_output": model_output,
+                "response_length": len(model_output),
+                "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
             },
         )
 
-        return RouterEval(
-            node_name="router",
-            overall_success=judgement.routing_correct,
-            routing_correct=judgement.routing_correct,
+        return SimpleResponseEval(
+            node_name="generate_simple_response",
+            overall_success=overall_success,
+            handles_irrelevance=judgement.handles_irrelevance,
+            response_appropriateness=judgement.response_appropriateness,
             explanation=judgement.explanation,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -87,7 +104,11 @@ async def evaluate_router(
 
     except Exception as e:
         logger.error(
-            "Failed router evaluation",
-            extra={"error": str(e), "user_query": user_query},
+            "Failed SimpleResponse evaluation",
+            extra={
+                "error": str(e),
+                "user_query": user_query,
+                "response_length": len(model_output),
+            },
         )
         raise

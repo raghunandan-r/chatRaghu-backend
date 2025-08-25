@@ -1,12 +1,11 @@
 import os
 import re
-import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from dataclasses import dataclass, field
 from pinecone import Pinecone
 from openai import AsyncOpenAI, OpenAI
 
-from .models import RetrievalResult, Tool
+from .models import RetrievalResult
 from utils.logger import logger
 from opik import track, opik_context
 
@@ -40,7 +39,7 @@ class VectorStore:
     def __init__(self, index_name: str):
         self.index_name = index_name
         self._index = None
-    
+
     @property
     def index(self):
         if self._index is None:
@@ -71,6 +70,7 @@ class VectorStore:
         except Exception as e:
             logger.error("Vector store query failed", extra={"error": str(e)})
             raise
+
 
 # TODO: parameters can be removed once dynamic few shot is totally descoped.
 @dataclass
@@ -110,12 +110,12 @@ class RetrieveTool:
                 threshold = max(0.7, best_score * 0.9)
 
                 # Process and filter results in a single pass
-                processed_results = []                
+                processed_results = []
 
                 for doc, score in doc_score_pairs:
                     if score >= threshold:
                         processed_content = preprocess_text(doc["page_content"])
-                
+
                         processed_results.append(
                             RetrievalResult(
                                 content=processed_content,
@@ -125,7 +125,7 @@ class RetrieveTool:
                         )
 
                 opik_context.update_current_span(
-                    name="chunk_retrieval",
+                    name="retrieval",
                     input={"query": query},
                     output={"docs": processed_results},
                 )
@@ -143,69 +143,6 @@ class RetrieveTool:
             model="text-embedding-ada-002", input=text
         )
         return response.data[0].embedding
-
-
-@dataclass
-class ExampleSelector:
-    examples: List[Dict[str, str]]
-
-    @classmethod
-    async def initialize_examples(cls, examples: List[Dict[str, str]]):
-        """Initialize global example embeddings at server startup"""
-        global EXAMPLE_EMBEDDINGS
-        if not EXAMPLE_EMBEDDINGS and examples:
-            embeddings_response = await client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=[ex.get("user_query", ex.get("query", "")) for ex in examples],
-            )
-            EXAMPLE_EMBEDDINGS = [data.embedding for data in embeddings_response.data]
-
-    async def get_query_embedding(self, query: str) -> List[float]:
-        """Get embedding for query using global cache"""
-        global QUERY_EMBEDDINGS_CACHE
-        if query in QUERY_EMBEDDINGS_CACHE:
-            return QUERY_EMBEDDINGS_CACHE[query]
-
-        response = await client.embeddings.create(
-            model="text-embedding-ada-002", input=[query]
-        )
-        embedding = response.data[0].embedding
-        QUERY_EMBEDDINGS_CACHE[query] = embedding
-        return embedding
-
-    async def get_relevant_examples(
-        self, query: str, k: int = 3
-    ) -> List[Dict[str, str]]:
-        """Get the most relevant examples using global embeddings"""
-        # If no examples are available, return empty list
-        if not self.examples or not EXAMPLE_EMBEDDINGS:
-            logger.warning(
-                "No examples available for few-shot selection",
-                extra={
-                    "examples_count": len(self.examples),
-                    "embeddings_count": len(EXAMPLE_EMBEDDINGS)
-                    if EXAMPLE_EMBEDDINGS
-                    else 0,
-                },
-            )
-            return []
-
-        query_embedding = await self.get_query_embedding(query)
-
-        # Calculate similarities
-        similarities = [
-            np.dot(query_embedding, ex_embedding)
-            / (np.linalg.norm(query_embedding) * np.linalg.norm(ex_embedding))
-            for ex_embedding in EXAMPLE_EMBEDDINGS
-        ]
-
-        # Get top k examples, but ensure we don't exceed available examples
-        k = min(k, len(self.examples), len(EXAMPLE_EMBEDDINGS))
-        if k == 0:
-            return []
-
-        top_indices = np.argsort(similarities)[-k:][::-1]
-        return [self.examples[i] for i in top_indices]
 
 
 # Initialize single vector store instance

@@ -9,26 +9,22 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
 
-class RelevanceDecision(BaseModel):
-    """Schema for relevance check LLM responses."""
-    decision: Literal["RELEVANT", "IRRELEVANT"]
-
-
 class RoutingDecision(BaseModel):
     """Schema for routing decision LLM responses."""
-    decision: Literal["RETRIEVE", "SUFFICIENT"]
-    query_for_retrieval: Optional[str] = Field(None, description="Refined query")
 
-
-class DeflectionCategoryDecision(BaseModel):
-    """Schema for deflection category classification LLM responses."""
-    decision: Literal["OFFICIAL", "JEST", "HACK"]
+    decision: Literal[
+        "answer_with_history", "retrieve_and_answer", "deflect", "greeting"
+    ]
+    query_for_retrieval: Optional[str] = Field(
+        None, description="An improved query for retrieval, if needed"
+    )
 
 
 class GenerationResponse(BaseModel):
     """Schema for final generation LLM responses.
     might extend this to include citations, mode, and safety flags in the future.
     """
+
     text: str
     # citations: list[str] = []
     # mode: Literal["deflection","rag","history"]

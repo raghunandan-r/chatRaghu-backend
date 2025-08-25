@@ -8,8 +8,8 @@ from utils.logger import logger
 from models import EnrichedNodeExecutionLog
 
 from .base import client, get_eval_prompt, get_system_message
-from .judgements import LLMGenerateWithContextJudgement
-from .models import GenerateWithContextEval
+from .judgements import LLMRAGJudgement
+from .models import RAGEval
 
 
 @backoff.on_exception(
@@ -19,18 +19,17 @@ from .models import GenerateWithContextEval
     max_time=config.llm.openai_timeout_seconds,
 )
 @track(capture_input=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
-async def evaluate_generate_with_context(
+async def evaluate_rag(
     node_execution: EnrichedNodeExecutionLog, user_query: str
-) -> GenerateWithContextEval:
-    """Evaluates the generate_with_context node output using a structured LLM call."""
+) -> RAGEval:
+    """Evaluates the RAG adapter output using a structured LLM call."""
 
     model_output = node_execution.output.get("text", "")
     retrieved_docs = node_execution.retrieved_docs or []
-    # original_system_prompt = get_main_graph_prompt("generate_with_context")
     conversation_history = node_execution.input.get("conversation_history", [])
 
     logger.info(
-        "Starting generate_with_context evaluation",
+        "Starting RAG evaluation",
         extra={
             "user_query": user_query,
             "response_length": len(model_output),
@@ -50,19 +49,18 @@ async def evaluate_generate_with_context(
     docs_text = "\n".join(docs_content) if docs_content else "No documents retrieved."
 
     eval_prompt = get_eval_prompt(
-        "generate_with_context",
-        # original_system_prompt=original_system_prompt,
+        "rag",
         user_query=user_query,
         conversation_history=conversation_history,
         docs_text=docs_text,
         model_output=model_output,
     )
-    system_message = get_system_message("generate_with_context")
+    system_message = get_system_message("rag")
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(
             model=config.llm.openai_model,
-            response_model=LLMGenerateWithContextJudgement,
+            response_model=LLMRAGJudgement,
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": eval_prompt},
@@ -80,12 +78,12 @@ async def evaluate_generate_with_context(
                 judgement.answer_relevance,
                 judgement.includes_key_info,
                 judgement.handles_irrelevance,
-                judgement.context_relevance,
+                judgement.document_relevance,
             ]
         )
 
         opik_context.update_current_span(
-            name="generate_with_context",
+            name="rag",
             input={
                 "query": user_query,
                 "response_length": len(model_output),
@@ -97,17 +95,16 @@ async def evaluate_generate_with_context(
                 "answer_relevance": judgement.answer_relevance,
                 "includes_key_info": judgement.includes_key_info,
                 "handles_irrelevance": judgement.handles_irrelevance,
-                "context_relevance": judgement.context_relevance,
+                "document_relevance": judgement.document_relevance,
             },
             metadata={
-                # "system_prompt": original_system_prompt,
                 "llm_judgement": judgement.model_dump(),
                 "docs_scores": [doc.get("score", 0.0) for doc in retrieved_docs],
             },
         )
 
         logger.info(
-            "EVAL_NODE_PROCESSED: Completed generate_with_context evaluation",
+            "EVAL_NODE_PROCESSED: Completed RAG evaluation",
             extra={
                 "user_query": user_query,
                 "response_length": len(model_output),
@@ -118,14 +115,14 @@ async def evaluate_generate_with_context(
             },
         )
 
-        return GenerateWithContextEval(
-            node_name="generate_with_context",
+        return RAGEval(
+            node_name="generate_answer_with_rag",
             overall_success=overall_success,
             faithfulness=judgement.faithfulness,
             answer_relevance=judgement.answer_relevance,
             includes_key_info=judgement.includes_key_info,
             handles_irrelevance=judgement.handles_irrelevance,
-            context_relevance=judgement.context_relevance,
+            document_relevance=judgement.document_relevance,
             explanation=judgement.explanation,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -133,7 +130,7 @@ async def evaluate_generate_with_context(
 
     except Exception as e:
         logger.error(
-            "Failed generate_with_context evaluation",
+            "Failed RAG evaluation",
             extra={
                 "error": str(e),
                 "user_query": user_query,

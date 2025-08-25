@@ -7,11 +7,11 @@ evaluation service for processing conversation evaluations.
 
 import os
 import httpx
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
 from utils.logger import logger
-from evaluation_models import ConversationFlow
+from .evaluation_models import ConversationFlow
 
 
 @dataclass
@@ -24,25 +24,27 @@ class EvaluationResponse:
     message: str = ""
     evaluation_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    
-  
+
     @classmethod
-    def from_dict(cls, data: dict) -> 'EvaluationResponse':
+    def from_dict(cls, data: dict) -> "EvaluationResponse":
         """Create instance from dictionary, handling datetime parsing"""
-        if 'timestamp' in data and isinstance(data['timestamp'], str):
-            data['timestamp'] = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+        if "timestamp" in data and isinstance(data["timestamp"], str):
+            data["timestamp"] = datetime.fromisoformat(
+                data["timestamp"].replace("Z", "+00:00")
+            )
         return cls(**data)
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
         result = {
-            'thread_id': self.thread_id,
-            'success': self.success,
-            'timestamp': self.timestamp.isoformat(),
-            'evaluation_result': self.evaluation_result,
-            'error': self.error
+            "thread_id": self.thread_id,
+            "success": self.success,
+            "timestamp": self.timestamp.isoformat(),
+            "evaluation_result": self.evaluation_result,
+            "error": self.error,
         }
         return result
+
 
 class EvaluationClient:
     """Client for communicating with the evaluation service"""
@@ -133,7 +135,10 @@ class EvaluationClient:
 
             logger.info(
                 "Successfully submitted evaluation request",
-                extra={"thread_id": conversation_flow.thread_id, "success": result.success},
+                extra={
+                    "thread_id": conversation_flow.thread_id,
+                    "success": result.success,
+                },
             )
 
             return result
@@ -144,6 +149,7 @@ class EvaluationClient:
                 extra={"thread_id": conversation_flow.thread_id, "error": str(e)},
             )
             raise
+
 
 # Global evaluation client instance
 evaluation_client: Optional[EvaluationClient] = None
@@ -156,9 +162,7 @@ async def get_evaluation_client() -> EvaluationClient:
         # Get configuration from environment
         eval_service_url = os.getenv("EVALUATION_SERVICE_URL")
         timeout = int(os.getenv("EVALUATION_SERVICE_TIMEOUT", "30"))
-        evaluation_client = EvaluationClient(
-            base_url=eval_service_url, timeout=timeout
-        )
+        evaluation_client = EvaluationClient(base_url=eval_service_url, timeout=timeout)
     return evaluation_client
 
 

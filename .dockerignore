@@ -28,6 +28,7 @@ __pycache__/
 .env.*
 !/.env.example
 secrets/
+docker-compose.test.yml
 
 # OS-specific files
 .DS_Store

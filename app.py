@@ -12,18 +12,16 @@ from contextlib import asynccontextmanager
 import time
 import logging
 import uvicorn
-import traceback
 from graph import (
     MessagesState,
     HumanMessage,
-    AIMessage,
 )
 from utils.logger import logger
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
-from evaluation_client import get_evaluation_client, close_evaluation_client
-from evaluation_queue_manager import EvaluationQueueManager
+from graph import get_evaluation_client, close_evaluation_client
+from graph import EvaluationQueueManager
 
 from openai import AsyncOpenAI
 import instructor
@@ -125,20 +123,20 @@ async def lifespan(app: FastAPI):
     # Startup
     cleanup_task = asyncio.create_task(Storage.cleanup_old_entries())
 
-
     # Initialize evaluation client
     app.state.evaluation_client = await get_evaluation_client()
 
     # Initialize queue manager for graph
     app.state.queue_manager = EvaluationQueueManager()
-    
+
     instructor_client = instructor.from_openai(
         AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     )
     # GraphEngine
-    engine = create_engine(instructor_client=instructor_client, queue_manager=app.state.queue_manager)
+    engine = create_engine(
+        instructor_client=instructor_client, queue_manager=app.state.queue_manager
+    )
     app.state.engine = engine
-
 
     # Start services
     await app.state.queue_manager.start()
@@ -266,13 +264,13 @@ async def logging_middleware(request: Request, call_next):
     return response
 
 
-async def stream_chunks(stream_gen,  request: Request):
+async def stream_chunks(stream_gen, request: Request):
     async for chunk, meta in stream_gen:
         if chunk.type == "content" and chunk.content:
-            for line in str(chunk.content).split('\n'):
+            for line in str(chunk.content).split("\n"):
                 yield f"data: {line}\n"
             yield "\n"
-            await asyncio.sleep(0) # immediate flush
+            await asyncio.sleep(0)  # immediate flush
 
         elif chunk.type == "end":
             yield "data: [DONE]\n\n"
@@ -294,7 +292,11 @@ async def chat(
     request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)
 ):
     """Main chat endpoint handler"""
-    thread_id = chat_request.messages[0].thread_id if chat_request.messages else f"anon_{int(time.time())}_{os.urandom(4).hex()}"  # Generate anonymous thread ID
+    thread_id = (
+        chat_request.messages[0].thread_id
+        if chat_request.messages
+        else f"anon_{int(time.time())}_{os.urandom(4).hex()}"
+    )  # Generate anonymous thread ID
 
     try:
         await check_thread_rate_limit(thread_id)
@@ -311,7 +313,9 @@ async def chat(
             - 1
         )  # -1 because we just added one
 
-        stream_gen = request.app.state.engine.execute_stream(initial_state, run_id, turn_index)
+        stream_gen = request.app.state.engine.execute_stream(
+            initial_state, run_id, turn_index
+        )
 
         return FastAPIStreamingResponse(
             content=stream_chunks(stream_gen, request),

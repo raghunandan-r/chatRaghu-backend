@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -13,30 +13,36 @@ class NodeEvaluation(BaseModel):
     completion_tokens: Optional[int] = None
 
 
-class RelevanceCheckEval(NodeEvaluation):
-    classification: Literal["IRRELEVANT", "RELEVANT"]
-    format_valid: bool
+class RouterEval(NodeEvaluation):
+    routing_correct: bool
     explanation: str
 
 
-class QueryOrRespondEval(NodeEvaluation):
-    classification: Literal["RETRIEVE", "SUFFICIENT"]
-    format_valid: bool
-    explanation: str
+class RAGEval(NodeEvaluation):
+    """Evaluation for RAG adapter responses"""
 
-
-class FewShotSelectorEval(NodeEvaluation):
-    category: Literal["OFFICIAL", "JEST", "HACK"]
-    category_appropriate: bool
-    style_appropriate: bool
-    explanation: str
-
-
-class GenerateWithContextEval(NodeEvaluation):
-    overall_success: bool
     faithfulness: bool
     answer_relevance: bool
     includes_key_info: bool
     handles_irrelevance: bool
-    context_relevance: bool
+    document_relevance: bool
+    explanation: str
+
+
+class HistoryEval(NodeEvaluation):
+    """Evaluation for History adapter responses"""
+
+    faithfulness: bool
+    answer_relevance: bool
+    includes_key_info: bool
+    handles_irrelevance: bool
+    history_relevance: bool
+    explanation: str
+
+
+class SimpleResponseEval(NodeEvaluation):
+    """Evaluation for SimpleResponse adapter responses"""
+
+    handles_irrelevance: bool
+    response_appropriateness: bool
     explanation: str

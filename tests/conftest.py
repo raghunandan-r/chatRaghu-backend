@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Dict, Any, AsyncGenerator
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
 
 try:
     import pytest_httpx
@@ -24,6 +23,10 @@ except ImportError:
 # Setup path and import models
 def _setup_imports():
     """Setup imports with proper path handling"""
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     project_root = Path(__file__).parent.parent
     sys.path.insert(0, str(project_root))
 
@@ -38,7 +41,6 @@ def _setup_imports():
 
 ConversationFlow, EnrichedNodeExecutionLog = _setup_imports()
 
-load_dotenv()
 
 # Configure structured logging
 logging.basicConfig(
@@ -49,8 +51,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Test configuration
-MAIN_SERVICE_URL = "http://localhost:3000"
-EVALUATION_SERVICE_URL = "http://localhost:8001"
+MAIN_SERVICE_URL = os.getenv("MAIN_SERVICE_URL", "http://localhost:3000")
+EVALUATION_SERVICE_URL = os.getenv("EVALUATION_SERVICE_URL", "http://localhost:8001")
 TEST_API_KEY = os.getenv("TEST_API_KEY", "test_api_key_123")
 
 
@@ -107,7 +109,7 @@ def sample_chat_request() -> Dict[str, Any]:
         "messages": [
             {
                 "role": "user",
-                "content": "Hello, this is a test message",
+                "content": "Hello, this is a message for testing.",
                 "thread_id": "test-thread-456",
             }
         ]

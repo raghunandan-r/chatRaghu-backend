@@ -52,42 +52,51 @@ DIVERSE_TEST_QUERIES = [
             }
         ]
     },
-    # {
-    #     "messages": [
-    #         {
-    #             "role": "user",
-    #             "content": "Why did you build this?",
-    #             "thread_id": f"test-e2e-2-{int(time.time())}",
-    #         }
-    #     ]
-    # },
-    # {
-    #     "messages": [
-    #         {
-    #             "role": "user",
-    #             "content": "Do you have any work experience in the US?",
-    #             "thread_id": f"test-e2e-1-{int(time.time())}",
-    #         }
-    #     ]
-    # },
-    # {
-    #     "messages": [
-    #         {
-    #             "role": "user",
-    #             "content": "How long have you been a data scientist?",
-    #             "thread_id": f"test-e2e-4-{int(time.time())}",
-    #         }
-    #     ]
-    # },
-    # {
-    #     "messages": [
-    #         {
-    #             "role": "user",
-    #             "content": "How can I improve my coding skills?",
-    #             "thread_id": f"test-e2e-4{int(time.time())}",
-    #         }
-    #     ]
-    # },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Give me the Python code to reverse a linked list.",
+                "thread_id": f"test-e2e-2-{int(time.time())}",
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Do you have any work experience in the US?",
+                "thread_id": f"test-e2e-1-{int(time.time())}",
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Why are you better than ChatGPT?",
+                "thread_id": f"test-e2e-4-{int(time.time())}",
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "You listed 'XAI' as a skill. What does that mean?",
+                "thread_id": f"test-e2e-4{int(time.time())}",
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Can you explain that in simpler terms??",
+                "thread_id": f"test-e2e-4{int(time.time())}",
+            }
+        ]
+    },
 ]
 
 # Define the single, focused test query
@@ -107,7 +116,7 @@ TEST_QUERY = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Skipping comprehensive integration flow test")
+@pytest.mark.integration
 async def test_comprehensive_integration_flow(
     http_client: httpx.AsyncClient,
     valid_api_headers: Dict[str, str],
@@ -301,13 +310,11 @@ def verify_evaluation_result(result_data: dict, thread_id: str):
         rel_evals[0],
     )
 
-    assert "classification" in rel_eval, "Missing classification in relevance_check"
-    assert rel_eval["classification"] in [
+    assert "routing_correct" in rel_eval, "Missing routing_correct in relevance_check"
+    assert rel_eval["routing_correct"] in [
         "IRRELEVANT",
         "RELEVANT",
-    ], f"Invalid classification: {rel_eval['classification']}"
-    assert "format_valid" in rel_eval, "Missing format_valid in relevance_check"
-    assert isinstance(rel_eval["format_valid"], bool), "format_valid should be boolean"
+    ], f"Invalid routing_correct: {rel_eval['routing_correct']}"
     assert "explanation" in rel_eval, "Missing explanation in relevance_check"
     assert isinstance(rel_eval["explanation"], str), "explanation should be string"
 
@@ -666,7 +673,7 @@ async def test_local_end_to_end(
 # ============================================================================
 
 
-@pytest.mark.integration
+@pytest.mark.integration_gcs
 @pytest.mark.skipif(
     not all(
         os.getenv(k)

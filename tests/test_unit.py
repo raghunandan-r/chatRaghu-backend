@@ -49,8 +49,7 @@ def mock_evaluate_relevance_check(node_execution, user_query):
         (),
         {
             "overall_success": True,
-            "classification": "RELEVANT",
-            "format_valid": True,
+            "routing_correct": True,
             "explanation": "Mock evaluation",
         },
     )()
@@ -549,7 +548,7 @@ class TestStorageBackends:
             )
 
     # Integration test for real GCS (optional - requires credentials)
-    @pytest.mark.integration
+    @pytest.mark.integration_gcs
     @pytest.mark.skipif(
         not os.getenv("STORAGE_GCS_BUCKET_NAME")
         or not os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
@@ -711,12 +710,10 @@ class TestEvaluatorModules:
 
         # Verify the result has expected structure
         assert hasattr(result, "overall_success")
-        assert hasattr(result, "classification")
-        assert hasattr(result, "format_valid")
+        assert hasattr(result, "routing_correct")
         assert hasattr(result, "explanation")
         assert result.overall_success is True
-        assert result.classification == "RELEVANT"
-        assert result.format_valid is True
+        assert result.routing_correct == "RELEVANT"
         assert result.explanation == "Mock evaluation"
 
     @pytest.mark.asyncio

@@ -8,8 +8,8 @@ the separate evaluation service instead of handling evaluations locally.
 import asyncio
 from typing import Optional
 from utils.logger import logger
-from evaluation_models import ConversationFlow
-from evaluation_client import get_evaluation_client
+from .evaluation_models import ConversationFlow
+from .evaluation_client import get_evaluation_client
 
 
 class EvaluationQueueManager:
@@ -52,7 +52,7 @@ class EvaluationQueueManager:
 
         except Exception as e:
             logger.error(
-                f"Evaluation service request failed, RETRYING!", # TODO: retry only if its an LLM API call error
+                "Evaluation service request failed, RETRYING!",  # TODO: retry only if its an LLM API call error
                 extra={"error": str(e), "thread_id": message.thread_id},
             )
 
