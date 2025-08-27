@@ -17,7 +17,7 @@ from .models import SimpleResponseEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
 async def evaluate_simple_response(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> SimpleResponseEval:
@@ -30,7 +30,7 @@ async def evaluate_simple_response(
         "Starting SimpleResponse evaluation",
         extra={
             "user_query": user_query,
-            "response_length": len(model_output),
+            "response": model_output,
         },
     )
 
@@ -66,14 +66,12 @@ async def evaluate_simple_response(
 
         opik_context.update_current_span(
             name="simple_response",
-            input={
-                "query": user_query,
-                "response_length": len(model_output),
-            },
+            input=eval_prompt,
             output={
                 "overall_success": overall_success,
                 "response_appropriateness": judgement.response_appropriateness,
                 "handles_irrelevance": judgement.handles_irrelevance,
+                "explanation": judgement.explanation,
             },
             metadata={
                 "llm_judgement": judgement.model_dump(),
@@ -83,8 +81,7 @@ async def evaluate_simple_response(
         logger.info(
             "EVAL_NODE_PROCESSED: Completed SimpleResponse evaluation",
             extra={
-                "user_query": user_query,
-                "response_length": len(model_output),
+                "user_query": user_query,                
                 "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,
@@ -108,7 +105,7 @@ async def evaluate_simple_response(
             extra={
                 "error": str(e),
                 "user_query": user_query,
-                "response_length": len(model_output),
+                "response": model_output,
             },
         )
         raise

@@ -14,7 +14,7 @@ from .models import MessagesState, HumanMessage, AIMessage, ToolMessage
 
 TEMPLATES_PATH = Path(__file__).parent / "prompt_templates.json"
 TEMPLATES = json.load(open(TEMPLATES_PATH, "r", encoding="utf-8"))
-
+graph_version = TEMPLATES["version"]
 
 def build_conversation_history(
     state: MessagesState, max_history=24, include_tool_content=True

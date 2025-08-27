@@ -183,7 +183,7 @@ async def evaluate_conversation(
             f"EVAL_APP_LOG: Received evaluation request for thread_id={request.thread_id}",
             extra={
                 "thread_id": request.thread_id,
-                "node_count": len(request.node_executions),
+                "nodes_to_evaluate":request.node_executions,
             },
         )
 

@@ -17,7 +17,7 @@ from .models import RouterEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
 async def evaluate_router(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RouterEval:
@@ -58,10 +58,14 @@ async def evaluate_router(
 
         opik_context.update_current_span(
             name="router",
-            input={"query": user_query, "history": conversation_history},
-            output={"classification": judgement.routing_correct},
+            input=eval_prompt,
+            output={
+                "overall_success": judgement.routing_correct,
+                "routing_correct": judgement.routing_correct,
+                "explanation": judgement.explanation,
+            },
             metadata={
-                "system_prompt": eval_prompt,
+                "system_prompt": system_message,
                 "llm_judgement": judgement.model_dump(),
             },
         )

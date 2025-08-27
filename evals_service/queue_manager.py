@@ -138,7 +138,7 @@ class DualQueueManager:
                 "Processing audit request",
                 extra={
                     "thread_id": request.thread_id,
-                    "node_count": len(request.node_executions),
+                    "nodes_to_evaluate": request.node_executions,
                 },
             )
             
@@ -166,7 +166,7 @@ class DualQueueManager:
                 "Processing evaluation request",
                 extra={
                     "thread_id": message.thread_id,
-                    "node_count": len(message.node_executions),
+                    "nodes_to_evaluate": message.node_executions,
                     "execution_path": [
                         f"{node.node_name}({node.output.get('next_edge', 'N/A')})"
                         for node in message.node_executions

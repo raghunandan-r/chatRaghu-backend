@@ -89,9 +89,7 @@ class AsyncEvaluator:
                 f"EVALUATOR_START: Starting evaluation for thread_id={conversation_flow.thread_id}",
                 extra={
                     "thread_id": conversation_flow.thread_id,
-                    "node_count": len(conversation_flow.node_executions)
-                    if conversation_flow
-                    else 0,
+                    "nodes_to_evaluate": conversation_flow.node_executions,
                 },
             )
 

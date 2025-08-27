@@ -18,7 +18,7 @@ from .models import RAGEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
 async def evaluate_rag(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RAGEval:
@@ -32,8 +32,8 @@ async def evaluate_rag(
         "Starting RAG evaluation",
         extra={
             "user_query": user_query,
-            "response_length": len(model_output),
-            "docs_count": len(retrieved_docs),
+            "response": model_output,
+            "docs": retrieved_docs,
         },
     )
 
@@ -84,11 +84,7 @@ async def evaluate_rag(
 
         opik_context.update_current_span(
             name="rag",
-            input={
-                "query": user_query,
-                "response_length": len(model_output),
-                "docs_count": len(retrieved_docs),
-            },
+            input=eval_prompt,
             output={
                 "overall_success": overall_success,
                 "faithful": judgement.faithfulness,
@@ -96,6 +92,7 @@ async def evaluate_rag(
                 "includes_key_info": judgement.includes_key_info,
                 "handles_irrelevance": judgement.handles_irrelevance,
                 "document_relevance": judgement.document_relevance,
+                "explanation": judgement.explanation,
             },
             metadata={
                 "llm_judgement": judgement.model_dump(),
@@ -106,8 +103,7 @@ async def evaluate_rag(
         logger.info(
             "EVAL_NODE_PROCESSED: Completed RAG evaluation",
             extra={
-                "user_query": user_query,
-                "response_length": len(model_output),
+                "user_query": user_query,                
                 "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,
@@ -134,8 +130,8 @@ async def evaluate_rag(
             extra={
                 "error": str(e),
                 "user_query": user_query,
-                "response_length": len(model_output),
-                "docs_count": len(retrieved_docs),
+                "response": model_output,
+                "docs": retrieved_docs,
             },
         )
         raise

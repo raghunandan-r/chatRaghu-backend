@@ -6,6 +6,7 @@ reading from environment variables with sensible defaults.
 """
 
 from dataclasses import dataclass
+import graph.utils
 
 
 @dataclass
@@ -30,3 +31,6 @@ class GraphConfig:
     stream_timeout: int = 60
     chunk_timeout: int = 30
     keep_alive_interval: int = 15
+
+    # Graph version
+    graph_version: str = graph.utils.graph_version

@@ -55,7 +55,7 @@ class LocalStorageBackend:
                 f"Successfully wrote {len(data)} records to {filename}",
                 extra={
                     "json_path": str(json_path),
-                    "record_count": len(data),
+                    "records_written": data,
                     "json_size_bytes": json_path.stat().st_size
                     if json_path.exists()
                     else 0,
@@ -70,7 +70,7 @@ class LocalStorageBackend:
                 extra={
                     "error": str(e),
                     "file_name": filename,
-                    "record_count": len(data),
+                    "records_written": data,
                 },
             )
             return False
@@ -166,7 +166,7 @@ class GCSStorageBackend:
                 f"Successfully wrote {len(data)} records to GCS",
                 extra={
                     "gcs_path": f"gs://{self.bucket_name}/{filename}",
-                    "record_count": len(data),
+                    "records_written": data,
                 },
             )
             return True

@@ -180,7 +180,7 @@ class GraphEngine:
             thread_id=initial_state.thread_id,
             turn_index=turn_index,
             user_query=initial_state.user_query,
-            graph_version="v1",
+            graph_version=self.config.graph_version,
             latency_ms=None,
             time_to_first_token_ms=None,
             total_prompt_tokens=0,

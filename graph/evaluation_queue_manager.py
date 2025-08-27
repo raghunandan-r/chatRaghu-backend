@@ -38,7 +38,7 @@ class EvaluationQueueManager:
                 "Sending conversation flow to evaluation service",
                 extra={
                     "thread_id": message.thread_id,
-                    "node_count": len(message.node_executions),
+                    "nodes_to_evaluate": message.node_executions,
                 },
             )
 
