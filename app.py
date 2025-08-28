@@ -15,17 +15,18 @@ import uvicorn
 from graph import (
     MessagesState,
     HumanMessage,
+    get_evaluation_client,
+    close_evaluation_client,
+    EvaluationQueueManager,
+    create_engine,
 )
 from utils.logger import logger
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
-from graph import get_evaluation_client, close_evaluation_client
-from graph import EvaluationQueueManager
 
 from openai import AsyncOpenAI
 import instructor
-from graph.assembly import create_engine
 
 # Load .env files only if they exist
 if os.path.exists(".env"):

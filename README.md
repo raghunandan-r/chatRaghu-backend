@@ -11,55 +11,58 @@ The application is split into two main services:
 
 ## Conversation Flow Architecture
 
-The main service implements a sophisticated graph-based conversation engine with multiple decision nodes:
+The main service implements a simplified, adapter-driven graph engine:
 
 ```mermaid
 graph TD
-    A[User Query] --> B[Relevance Check]
-    B -->|RELEVANT| C[Query or Respond]
-    B -->|IRRELEVANT| D[Deflection Categorizer]
+    A[User Query] --> R[Router]
 
-    C -->|RETRIEVE| E[Document Retrieval]
-    C -->|SUFFICIENT| F[Generate Answer]
+    R -->|greeting| GS[Generate Simple Response]
+    R -->|deflect| GS
+    R -->|answer_with_history| GH[Generate Answer (History)]
+    R -->|retrieve_and_answer| GR[Generate Answer (RAG)]
 
-    E --> F
-    D --> F
+    GS --> S[Stream Response]
+    GH --> S
+    GR --> S
+    S --> Q[Enqueue for Evaluation]
 
-    F --> G[Stream Response]
-    G --> H[Enqueue for Evaluation]
-
-    H --> I[Message Queue]
-    I --> J[Evaluation Service]
-    J --> K[Multiple Evaluators]
-    K --> L[Store Results]
+    Q --> EV[Evaluation Service]
+    EV --> K[Store Results]
 
     style A fill:#e1f5fe
-    style B fill:#fff3e0
-    style C fill:#fff3e0
-    style D fill:#fff3e0
-    style F fill:#e8f5e8
-    style G fill:#e8f5e8
-    style H fill:#f3e5f5
-    style I fill:#f3e5f5
-    style J fill:#fff8e1
+    style R fill:#fff3e0
+    style GS fill:#e8f5e8
+    style GH fill:#e8f5e8
+    style GR fill:#e8f5e8
+    style S fill:#e8f5e8
+    style Q fill:#f3e5f5
+    style EV fill:#fff8e1
     style K fill:#fff8e1
-    style L fill:#fff8e1
 ```
 
 ### Graph Node Details
 
-**Decision Nodes (Non-Streaming):**
-- **Relevance Check**: Classifies queries as RELEVANT/IRRELEVANT using structured LLM validation
-- **Query or Respond**: Decides between RETRIEVE (for new information) or SUFFICIENT (use conversation history)
-- **Deflection Categorizer**: For irrelevant queries, categorizes as OFFICIAL/JEST/HACK
+- **Router (non-streaming)**: Chooses one of four decisions: `greeting`, `deflect`, `answer_with_history`, or `retrieve_and_answer`.
+- **Generate Simple Response (streaming)**: Handles `greeting` and `deflect` outcomes.
+- **Generate Answer with History (streaming)**: Answers using conversation history only.
+- **Generate Answer with RAG (streaming)**: Retrieves documents and answers with context.
 
-**Generation Node (Streaming):**
-- **Generate Answer**: Streams the final response based on context mode (RAG, history, or deflection)
+### Edge Map
 
-**Context Modes:**
-- **RAG**: Uses retrieved documents for context
-- **History**: Uses conversation history only
-- **Deflection**: Uses deflection category for appropriate response
+The routing edges are defined as:
+
+```text
+router:
+  greeting -> generate_simple_response
+  deflect -> generate_simple_response
+  answer_with_history -> generate_answer_with_history
+  retrieve_and_answer -> generate_answer_with_rag
+
+generate_simple_response -> END
+generate_answer_with_history -> END
+generate_answer_with_rag -> END
+```
 
 ## Services
 
@@ -106,17 +109,16 @@ Main Service → Queue Manager → Background Worker → HTTP Client → Evaluat
 
 ### Graph Engine Enhancements
 
-**Modular Adapter Architecture**
-- **NEW**: Each graph node implemented as a separate adapter class
-- **NEW**: Structured decision schemas with Pydantic validation
-- **NEW**: Streaming and non-streaming node support
-- **NEW**: Context-aware routing based on LLM decisions
+**Adapter Architecture**
+- **UPDATED**: Simplified to a single non-streaming `router` and three streaming generators
+- **UNCHANGED**: Structured validation via Pydantic models for routing and generation
+- **UNCHANGED**: Context-aware routing based on LLM decisions
 
-**Enhanced Conversation Flow**
-- **NEW**: Multi-stage decision pipeline (relevance → routing → generation)
-- **NEW**: Dynamic context mode selection (RAG, history, deflection)
-- **NEW**: Comprehensive audit logging with token usage tracking
-- **NEW**: Opik integration for distributed tracing
+**Conversation Flow**
+- **UPDATED**: Decisions consolidated into the `router` node
+- **UPDATED**: Generation handled by a single-step streaming node per mode (simple/history/RAG)
+- **UNCHANGED**: Comprehensive audit logging with token usage tracking
+- **UNCHANGED**: Opik integration for distributed tracing
 
 ### Evaluation Service Enhancements
 

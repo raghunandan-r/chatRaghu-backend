@@ -1,47 +1,65 @@
 # Graph Package Structure
 
-This directory contains the refactored graph-based conversational AI system, organized into logical modules for better maintainability and understanding.
+This directory contains the simplified graph-based conversational engine built on an adapter pattern.
 
 ## File Structure
 
 ```
 graph/
-├── __init__.py              # Package initialization and exports
-├── models.py                # Core data models and message types
-├── infrastructure.py        # Graph framework and base classes
-├── retrieval.py             # Vector store and retrieval tools
-├── nodes.py                 # Processing nodes and graph assembly
-├── prompt_templates.json    # Prompt templates for the system
-└── README.md               # This file
+├── __init__.py               # Package entry: exports engine creation and models
+├── adapters.py               # Router and generator adapters
+├── assembly.py               # Nodes/edges definition and engine factory
+├── config.py                 # Graph configuration
+├── engine.py                 # GraphEngine orchestration and auditing
+├── evaluation_client.py      # Client lifecycle helpers
+├── evaluation_models.py      # ConversationFlow, logs, schemas for audits
+├── evaluation_queue_manager.py# Queue manager interface
+├── models.py                 # Core data models and message types
+├── retrieval.py              # Vector store and retrieval tools
+├── schemas.py                # Pydantic response models (RoutingDecision, GenerationResponse)
+├── utils.py                  # Prompt rendering and helpers
+└── README.md                 # This file
 ```
 
 ## Module Overview
 
-### `models.py` - Core Data Models
-Contains all the data structures used throughout the system:
-- **Message Models**: `BaseMessage`, `HumanMessage`, `AIMessage`, `SystemMessage`, `ToolMessage`
-- **State Models**: `MessagesState`, `StreamingState`, `StreamingResponse`
-- **Tool Models**: `Tool`, `RetrievalResult`
-- **Global State**: Thread message store and embeddings cache
+### `adapters.py`
+Implements the graph nodes as light-weight adapters:
+- **RouterAdapter**: Non-streaming decision node producing `RoutingDecision`
+- **GenerateSimpleResponseAdapter**: Streaming generator for `greeting`/`deflect`
+- **GenerateAnswerWithHistoryAdapter**: Streaming generator using conversation history
+- **GenerateAnswerWithRagAdapter**: Streaming generator with retrieval side-effect
 
-### `infrastructure.py` - Graph Framework
-Provides the foundational classes for the graph system:
-- **Base Classes**: `Node`, `StreamingNode`, `StateGraph`, `StreamingStateGraph`
-- **Mixins**: `ClassificationNodeMixin`, `RetrievalNodeMixin`, `SystemPromptNodeMixin`
-- **Abstract Methods**: Base implementations for node processing and metadata collection
+### `assembly.py`
+Defines the graph topology matching the current design:
 
-### `retrieval.py` - Retrieval System
-Handles all vector search and document retrieval functionality:
-- **VectorStore**: Pinecone-based vector database interface
-- **RetrieveTool**: Tool for retrieving relevant documents
-- **ExampleSelector**: Few-shot learning example selection
-- **Utilities**: Text preprocessing and embedding generation
+```text
+nodes:
+  router, generate_simple_response, generate_answer_with_history, generate_answer_with_rag
 
-### `nodes.py` - Processing Nodes
-Contains all the processing nodes and graph assembly:
-- **Processing Nodes**: `RelevanceCheckNode`, `QueryOrRespondNode`, `FewShotSelectorNode`, `GenerateWithRetrievedContextNode`, `GenerateWithPersonaNode`
-- **Utility Functions**: Routing conditions and streaming utilities
-- **Graph Assembly**: Complete graph configuration and initialization
+edges:
+  router:
+    greeting -> generate_simple_response
+    deflect -> generate_simple_response
+    answer_with_history -> generate_answer_with_history
+    retrieve_and_answer -> generate_answer_with_rag
+  generate_simple_response -> END
+  generate_answer_with_history -> END
+  generate_answer_with_rag -> END
+
+entry_point: router
+```
+
+### `engine.py`
+Coordinates prompt building, LLM calls (streaming/non-streaming), routing, auditing, and enqueueing.
+
+### `schemas.py`
+Contains Pydantic models used for structured validation:
+- **RoutingDecision** with `decision` and optional `query_for_retrieval`
+- **GenerationResponse** with `text`
+
+### `retrieval.py`
+`RetrieveTool` integrates vector search used by `GenerateAnswerWithRagAdapter`.
 
 ## Usage
 
@@ -50,8 +68,9 @@ Contains all the processing nodes and graph assembly:
 from graph import (
     MessagesState,
     HumanMessage,
-    streaming_graph,
-    set_queue_manager
+    create_engine,
+    get_evaluation_client,
+    close_evaluation_client,
 )
 ```
 
@@ -59,47 +78,17 @@ from graph import (
 ```python
 from graph import MessagesState, HumanMessage
 
-message = HumanMessage(content="Hello, how are you?")
-state = MessagesState(messages=[message], thread_id="user-123")
+state = MessagesState(
+    messages=[HumanMessage(content="Hello, how are you?")],
+    thread_id="user-123",
+    user_query="Hello, how are you?",
+)
 ```
 
-### Running the Graph
-```python
-from graph import streaming_graph
-
-# Execute the graph with streaming
-async for chunk, metadata in streaming_graph.execute_stream(state):
-    print(chunk.content)
-```
-
-## Testing
-
-The new structure is tested with pytest. Run the tests with:
-
-```bash
-# Run all tests
-pytest
-
-# Run only graph structure tests
-pytest -m graph_structure
-
-# Run specific test file
-pytest tests/test_graph_structure.py
-```
 
 ## Migration Notes
 
-This structure maintains full backward compatibility with the previous `graph.graph` imports. The `__init__.py` file exports all the necessary components to ensure existing code continues to work without changes.
-
-### Old Import Pattern (Still Works)
-```python
-from graph.graph import MessagesState, HumanMessage, streaming_graph
-```
-
-### New Import Pattern (Recommended)
-```python
-from graph import MessagesState, HumanMessage, streaming_graph
-```
+The package maintains compatibility via `graph.__init__` exports. Prefer the new `create_engine` entry point over historical graph builders.
 
 ## Benefits of the New Structure
 
@@ -112,30 +101,18 @@ from graph import MessagesState, HumanMessage, streaming_graph
 
 ## Metrics and Evaluation Flow
 
-The graph is instrumented to capture detailed metrics for each conversation turn, which are then passed to the `evals-service` for analysis and storage.
+The engine captures detailed metrics for each turn and passes them to the evaluation service.
 
 ### Captured Metrics
-- **IDs**: `run_id` (for batching), `thread_id` (for conversation), `turn_index` (for ordering).
-- **Latency**: `latency_ms` (total turn time), `time_to_first_token_ms` (for streaming nodes).
-- **Token Counts**: `prompt_tokens` and `completion_tokens` are captured for each individual LLM call and aggregated for the entire turn (`total_prompt_tokens`, `total_completion_tokens`).
+- **IDs**: `run_id`, `thread_id`, `turn_index`
+- **Latency**: `latency_ms`, `time_to_first_token_ms`
+- **Tokens**: Per-node `prompt_tokens`, `completion_tokens`, and aggregated totals
 
 ### Data Flow
-1.  **API Endpoint (`app.py`)**: Generates `run_id` and `turn_index` for each request.
-2.  **Graph Execution (`nodes.py`)**:
-    - `execute_stream_impl` receives the IDs and creates a `ConversationFlow` object to track the turn.
-    - Each node, upon calling the OpenAI API, extracts the `usage` data from the response.
-    - The token counts are stored temporarily on the `MessagesState` object.
-    - `execute_stream_impl` retrieves the token counts from the state and records them in an `EnrichedNodeExecutionLog` for that specific node.
-    - For streaming nodes, `time_to_first_token_ms` is calculated.
-    - At the end of the turn, `latency_ms` is calculated, and all token counts are aggregated.
-3.  **Queue**: The final, enriched `ConversationFlow` object is packaged in a `ResponseMessage` and sent to the `evals-service` queue.
+1. **API (`app.py`)**: Provides `run_id`, `turn_index` and initializes `MessagesState`.
+2. **Engine (`engine.py`)**: Orchestrates adapter calls, logs usage, and routes edges.
+3. **Queue**: Final `ConversationFlow` is enqueued for the evaluation service.
 
-## File Sizes
+## Notes
 
-- `models.py`: ~90 lines - Pure data structures
-- `infrastructure.py`: ~174 lines - Framework and base classes
-- `retrieval.py`: ~214 lines - Vector store and retrieval
-- `nodes.py`: ~1339 lines - Processing nodes and assembly
-- `__init__.py`: ~104 lines - Package exports
-
-Each file is focused and manageable, with clear boundaries between different types of functionality.
+The previous `nodes.py` and `infrastructure.py` are no longer used; functionality has been consolidated into `adapters.py`, `assembly.py`, and `engine.py`.
