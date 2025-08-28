@@ -280,9 +280,9 @@ class StorageManager:
 
         def _serialize_item(item):
             """Convert item to dictionary for storage"""
-            if hasattr(item, 'to_dict'):
+            if hasattr(item, "to_dict"):
                 return item.to_dict()
-            elif hasattr(item, 'model_dump'):  # Legacy Pydantic fallback
+            elif hasattr(item, "model_dump"):  # Legacy Pydantic fallback
                 return item.model_dump(mode="json")
             elif isinstance(item, dict):
                 return item
@@ -290,8 +290,6 @@ class StorageManager:
                 # Log warning for unexpected type
                 logger.warning(f"Unexpected item type for storage: {type(item)}")
                 return str(item)  # Fallback to string representation
-
-
 
         try:
             # Wait for the first item with timeout

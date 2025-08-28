@@ -50,7 +50,6 @@ Thumbs.db
 eval_results/
 audit_data/
 *.parquet
-*.json
 *.jsonl
 *.csv
 

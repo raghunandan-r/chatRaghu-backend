@@ -141,7 +141,7 @@ class DualQueueManager:
                     "nodes_to_evaluate": request.node_executions,
                 },
             )
-            
+
             # Store the audit request if storage manager is available, picked up by StorageManager._storage_worker()
             if self.audit_storage:
                 await self.audit_storage.queue.put(request)
@@ -197,9 +197,8 @@ class DualQueueManager:
                 extra={"thread_id": message.thread_id},
             )
         except Exception as e:
-
             logger.error(
-                f"Evaluation failed after in queue_manager._process_evaluation_request",
+                "Evaluation failed after in queue_manager._process_evaluation_request",
                 extra={
                     "error": str(e),
                     "message_data": message.to_dict(),

@@ -17,7 +17,11 @@ from .models import HistoryEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(
+    capture_input=False,
+    capture_output=False,
+    project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
+)
 async def evaluate_history(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> HistoryEval:
@@ -88,7 +92,7 @@ async def evaluate_history(
         logger.info(
             "EVAL_NODE_PROCESSED: Completed History evaluation",
             extra={
-                "user_query": user_query,                
+                "user_query": user_query,
                 "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,

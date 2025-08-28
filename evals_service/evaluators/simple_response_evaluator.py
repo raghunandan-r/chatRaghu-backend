@@ -17,7 +17,11 @@ from .models import SimpleResponseEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(
+    capture_input=False,
+    capture_output=False,
+    project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
+)
 async def evaluate_simple_response(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> SimpleResponseEval:
@@ -41,6 +45,19 @@ async def evaluate_simple_response(
         model_output=model_output,
     )
     system_message = get_system_message("simple_response")
+
+    if not eval_prompt or not system_message:
+        logger.error(
+            "Missing evaluator prompts; skipping evaluation",
+            extra={"evaluator": "simple_response"},
+        )
+        return SimpleResponseEval(
+            node_name="generate_simple_response",
+            overall_success=False,
+            handles_irrelevance=False,
+            response_appropriateness=False,
+            explanation="Evaluator prompts missing; evaluation skipped.",
+        )
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(
@@ -81,7 +98,7 @@ async def evaluate_simple_response(
         logger.info(
             "EVAL_NODE_PROCESSED: Completed SimpleResponse evaluation",
             extra={
-                "user_query": user_query,                
+                "user_query": user_query,
                 "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,

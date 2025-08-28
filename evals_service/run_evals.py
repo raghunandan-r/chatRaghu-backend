@@ -6,7 +6,7 @@ import backoff
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.logger import logger
@@ -76,7 +76,11 @@ class AsyncEvaluator:
         max_tries=config.service.max_retry_attempts,
         max_time=30,
     )
-    @track(capture_input=True, capture_output=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+    @track(
+        capture_input=True,
+        capture_output=True,
+        project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
+    )
     async def evaluate_response(
         self,
         conversation_flow: ConversationFlow,
@@ -108,7 +112,10 @@ class AsyncEvaluator:
                 if not evaluator_functions:
                     logger.info(
                         f"EVALUATOR_NODE_SKIPPED: No evaluators registered for node '{node_name}' for thread_id={conversation_flow.thread_id}",
-                        extra={"thread_id": conversation_flow.thread_id, "node_name": node_name},
+                        extra={
+                            "thread_id": conversation_flow.thread_id,
+                            "node_name": node_name,
+                        },
                     )
                     continue
 
@@ -116,7 +123,8 @@ class AsyncEvaluator:
                     eval_name = evaluator_func.__name__
                     try:
                         eval_result = await evaluator_func(
-                            node_execution=node_execution, user_query=conversation_flow.user_query
+                            node_execution=node_execution,
+                            user_query=conversation_flow.user_query,
                         )
 
                         # Get the evaluation result as dict
@@ -175,7 +183,9 @@ class AsyncEvaluator:
 
             # Calculate total latency
             total_latency_ms = (
-                (datetime.now(timezone.utc) - conversation_flow.start_time).total_seconds()
+                (
+                    datetime.now(timezone.utc) - conversation_flow.start_time
+                ).total_seconds()
                 * 1000
                 if conversation_flow and conversation_flow.start_time
                 else None
@@ -259,7 +269,9 @@ class AsyncEvaluator:
             return EvaluationResult(
                 # Identifiers - use defaults if conversation_flow is None
                 run_id=conversation_flow.run_id if conversation_flow else "unknown",
-                thread_id=conversation_flow.thread_id if conversation_flow else "unknown",
+                thread_id=conversation_flow.thread_id
+                if conversation_flow
+                else "unknown",
                 turn_index=conversation_flow.turn_index if conversation_flow else 0,
                 # Timestamps & Latency - use current time if conversation_flow is None
                 timestamp_start=conversation_flow.start_time

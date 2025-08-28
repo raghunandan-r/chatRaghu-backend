@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional, Any, Literal, Union
 from dataclasses import dataclass, field
 
+
 # Message Models
 @dataclass
 class BaseMessage:
@@ -14,7 +15,7 @@ class HumanMessage:
     type: Literal["human"] = "human"
 
 
-@dataclass  
+@dataclass
 class AIMessage:
     content: str
     type: Literal["ai"] = "ai"
@@ -41,27 +42,39 @@ class MessagesState:
     messages: List[Union[HumanMessage, AIMessage, SystemMessage, ToolMessage]]
     thread_id: str
     meta: Dict[str, Any] = field(default_factory=dict)
-    
+
     @property
     def user_query(self):
         return next(
-            (msg.content for msg in reversed(self.messages) if isinstance(msg, HumanMessage)),
+            (
+                msg.content
+                for msg in reversed(self.messages)
+                if isinstance(msg, HumanMessage)
+            ),
             None,
         )
 
     def update_thread_store(self):
         """Update global message store with current state"""
-        THREAD_MESSAGE_STORE[self.thread_id] = self.messages[-24:]  # Keep last 24 messages
+        THREAD_MESSAGE_STORE[self.thread_id] = self.messages[
+            -24:
+        ]  # Keep last 24 messages
 
     @classmethod
-    def from_thread(cls, thread_id: str, new_message: Union[AIMessage, ToolMessage, HumanMessage, SystemMessage]) -> "MessagesState":
+    def from_thread(
+        cls,
+        thread_id: str,
+        new_message: Union[AIMessage, ToolMessage, HumanMessage, SystemMessage],
+    ) -> "MessagesState":
         """Create state from thread history + new message"""
         messages = THREAD_MESSAGE_STORE.get(thread_id, [])
         return cls(messages=[*messages, new_message], thread_id=thread_id)
 
+
 @dataclass
 class StreamingResponse:
     """Represents a chunk of a streaming response"""
+
     # All fields have defaults, so order doesn't matter, but group logically
     type: Literal["content", "function_call", "end", "usage"] = "content"
     content: Optional[str] = None
@@ -70,7 +83,7 @@ class StreamingResponse:
     usage_stats: Optional[Dict[str, Any]] = None  # For token usage in streaming
 
 
-# Tool Models  
+# Tool Models
 @dataclass
 class Tool:
     name: str
@@ -80,6 +93,7 @@ class Tool:
     async def execute(self, **kwargs) -> Any:
         raise NotImplementedError
 
+
 @dataclass
 class RetrievalResult:
     content: str
@@ -87,11 +101,8 @@ class RetrievalResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
-            'content' : self.content,
-            'score' : self.score,
-            'metadata' : self.metadata
-        }
+        return {"content": self.content, "score": self.score, "metadata": self.metadata}
+
 
 # Global thread message store
 THREAD_MESSAGE_STORE: Dict[

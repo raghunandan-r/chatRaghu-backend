@@ -153,7 +153,6 @@ async def run_and_queue_evaluation(
         extra={"thread_id": request.thread_id},
     )
     try:
-
         await queue_manager.enqueue_evaluation(request)
         logger.info(
             f"EVAL_APP_LOG: Successfully enqueued for evaluation for thread_id={request.thread_id}",
@@ -183,7 +182,7 @@ async def evaluate_conversation(
             f"EVAL_APP_LOG: Received evaluation request for thread_id={request.thread_id}",
             extra={
                 "thread_id": request.thread_id,
-                "nodes_to_evaluate":request.node_executions,
+                "nodes_to_evaluate": request.node_executions,
             },
         )
 
@@ -258,7 +257,11 @@ async def health_check():
         }
     except Exception as e:
         logger.error("Health check failed", extra={"error": str(e)})
-        return {"status": "unhealthy", "error": str(e), "timestamp": datetime.now(timezone.utc)}
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc),
+        }
 
 
 @app.get("/metrics")

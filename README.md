@@ -18,21 +18,21 @@ graph TD
     A[User Query] --> B[Relevance Check]
     B -->|RELEVANT| C[Query or Respond]
     B -->|IRRELEVANT| D[Deflection Categorizer]
-    
+
     C -->|RETRIEVE| E[Document Retrieval]
     C -->|SUFFICIENT| F[Generate Answer]
-    
+
     E --> F
     D --> F
-    
+
     F --> G[Stream Response]
     G --> H[Enqueue for Evaluation]
-    
+
     H --> I[Message Queue]
     I --> J[Evaluation Service]
     J --> K[Multiple Evaluators]
     K --> L[Store Results]
-    
+
     style A fill:#e1f5fe
     style B fill:#fff3e0
     style C fill:#fff3e0

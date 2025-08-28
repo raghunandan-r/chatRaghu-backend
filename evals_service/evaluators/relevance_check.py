@@ -17,7 +17,11 @@ from .models import RouterEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(
+    capture_input=False,
+    capture_output=False,
+    project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
+)
 async def evaluate_router(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RouterEval:
@@ -40,6 +44,18 @@ async def evaluate_router(
         model_output=model_output,
     )
     system_message = get_system_message("router")
+
+    if not eval_prompt or not system_message:
+        logger.error(
+            "Missing evaluator prompts; skipping evaluation",
+            extra={"evaluator": "router"},
+        )
+        return RouterEval(
+            node_name="router",
+            overall_success=False,
+            routing_correct=False,
+            explanation="Evaluator prompts missing; evaluation skipped.",
+        )
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(

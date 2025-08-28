@@ -18,7 +18,11 @@ from .models import RAGEval
     max_tries=config.llm.openai_max_retries,
     max_time=config.llm.openai_timeout_seconds,
 )
-@track(capture_input=False, capture_output=False, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
+@track(
+    capture_input=False,
+    capture_output=False,
+    project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
+)
 async def evaluate_rag(
     node_execution: EnrichedNodeExecutionLog, user_query: str
 ) -> RAGEval:
@@ -56,6 +60,21 @@ async def evaluate_rag(
         model_output=model_output,
     )
     system_message = get_system_message("rag")
+
+    if not eval_prompt or not system_message:
+        logger.error(
+            "Missing evaluator prompts; skipping evaluation", extra={"evaluator": "rag"}
+        )
+        return RAGEval(
+            node_name="generate_answer_with_rag",
+            overall_success=False,
+            faithfulness=False,
+            answer_relevance=False,
+            includes_key_info=False,
+            handles_irrelevance=False,
+            document_relevance=False,
+            explanation="Evaluator prompts missing; evaluation skipped.",
+        )
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(
@@ -103,7 +122,7 @@ async def evaluate_rag(
         logger.info(
             "EVAL_NODE_PROCESSED: Completed RAG evaluation",
             extra={
-                "user_query": user_query,                
+                "user_query": user_query,
                 "overall_success": overall_success,
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,
