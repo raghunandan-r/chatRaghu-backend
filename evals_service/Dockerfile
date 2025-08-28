@@ -31,4 +31,4 @@ ENTRYPOINT ["./entrypoint.sh"]
 EXPOSE 8001
 
 # Restore original CMD with Railway compatibility
-CMD ["sh", "-c", "uvicorn app:app --host --port ${PORT:-8001}"]
+CMD ["sh", "-c", "uvicorn app:app --host :: --port ${PORT:-8001}"]
