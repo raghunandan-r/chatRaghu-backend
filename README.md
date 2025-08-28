@@ -14,31 +14,27 @@ The application is split into two main services:
 The main service implements a simplified, adapter-driven graph engine:
 
 ```mermaid
-graph TD
-    A[User Query] --> R[Router]
-
-    R -->|greeting| GS[Generate Simple Response]
-    R -->|deflect| GS
-    R -->|answer_with_history| GH[Generate Answer (History)]
-    R -->|retrieve_and_answer| GR[Generate Answer (RAG)]
-
-    GS --> S[Stream Response]
-    GH --> S
-    GR --> S
-    S --> Q[Enqueue for Evaluation]
-
-    Q --> EV[Evaluation Service]
-    EV --> K[Store Results]
-
-    style A fill:#e1f5fe
-    style R fill:#fff3e0
-    style GS fill:#e8f5e8
-    style GH fill:#e8f5e8
-    style GR fill:#e8f5e8
-    style S fill:#e8f5e8
-    style Q fill:#f3e5f5
-    style EV fill:#fff8e1
-    style K fill:#fff8e1
+graph TD;
+    A[User Query] --> R[Router];
+    R -->|greeting| GS[Generate Simple Response];
+    R -->|deflect| GS;
+    R -->|answer_with_history| GH[Generate Answer (History)];
+    R -->|retrieve_and_answer| GR[Generate Answer (RAG)];
+    GS --> S[Stream Response];
+    GH --> S;
+    GR --> S;
+    S --> Q[Enqueue for Evaluation];
+    Q --> EV[Evaluation Service];
+    EV --> K[Store Results];
+    style A fill:#e1f5fe;
+    style R fill:#fff3e0;
+    style GS fill:#e8f5e8;
+    style GH fill:#e8f5e8;
+    style GR fill:#e8f5e8;
+    style S fill:#e8f5e8;
+    style Q fill:#f3e5f5;
+    style EV fill:#fff8e1;
+    style K fill:#fff8e1;
 ```
 
 ### Graph Node Details
