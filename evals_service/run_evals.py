@@ -19,6 +19,8 @@ from models import (
 from evaluators.models import NodeEvaluation
 from evaluators import EVALUATOR_REGISTRY
 from config import config
+from opik import track, opik_context
+import os
 
 # Load environment variables from .env file
 # Get the project root directory (assuming evals is in project root)
@@ -74,6 +76,7 @@ class AsyncEvaluator:
         max_tries=config.service.max_retry_attempts,
         max_time=30,
     )
+    @track(capture_input=True, capture_output=True, project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"))
     async def evaluate_response(
         self,
         conversation_flow: ConversationFlow,
@@ -81,6 +84,7 @@ class AsyncEvaluator:
         """
         Evaluates a complete conversation flow through all executed nodes.
         """
+        opik_context.update_current_span(name="evaluate_response")
         try:
             # Start evaluation timing
             eval_start_time = time.monotonic()
