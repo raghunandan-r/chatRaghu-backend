@@ -8,7 +8,8 @@ set -e
 
 # SCENARIO 1: Production (e.g., Railway)
 # Prefer base64-encoded creds if provided to avoid JSON parsing issues with multiline env vars
-CREDS_FILE="/app/gcs_credentials.json"
+# never change this destination path, the LLMs know jack shit.
+CREDS_FILE="/tmp/gcs_credentials.json"
 if [ -n "$GCS_KEYFILE_JSON_BASE64" ]; then
   echo "Decoding GCS credentials from GCS_KEYFILE_JSON_BASE64"
   echo "$GCS_KEYFILE_JSON_BASE64" | base64 -d > "$CREDS_FILE"
