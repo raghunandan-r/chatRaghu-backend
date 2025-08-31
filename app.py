@@ -1,16 +1,18 @@
-import asyncio
 import os
 from dotenv import load_dotenv
-import re
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    Header,
+    Request,
+    BackgroundTasks,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse as FastAPIStreamingResponse
-from pydantic import BaseModel, field_validator
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from datetime import datetime
 from contextlib import asynccontextmanager
-import time
-import logging
 import uvicorn
 from graph import (
     MessagesState,
@@ -21,10 +23,10 @@ from graph import (
     create_engine,
 )
 from utils.logger import logger
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.logging import LoggingIntegration
 
+# import redis.asyncio as redis
+from upstash_redis.asyncio import Redis
+from graph.models import set_global_redis_client, SESSION_STORAGE_MODE
 from openai import AsyncOpenAI
 import instructor
 
@@ -33,134 +35,60 @@ if os.path.exists(".env"):
     load_dotenv(".env")
     load_dotenv(".env.development")
 
-if os.getenv("ENVIRONMENT") == "prod":
-    # Configure Sentry logging integration
-    sentry_logging = LoggingIntegration(
-        level=logging.INFO,  # Capture info and above as breadcrumbs
-        event_level=logging.ERROR,  # Send errors as events
-    )
+# Sentry initialization is now handled in the logger utility
+from utils.logger import initialize_sentry
 
-    sentry_sdk.init(
-        dsn=os.getenv("SENTRY_DSN"),
-        environment="production",
-        traces_sample_rate=1.0,
-        profiles_sample_rate=1.0,
-        integrations=[
-            FastApiIntegration(),
-            sentry_logging,  # Add logging integration
-        ],
-        send_default_pii=True,
-        _experiments={
-            "continuous_profiling_auto_start": True,
-        },
-    )
-
-
-class ClientMessage(BaseModel):
-    role: str
-    content: str
-    thread_id: Optional[str] = None
+initialize_sentry()
 
 
 class ChatRequest(BaseModel):
-    messages: List[ClientMessage]  # Accept last messages
-
-    @field_validator("messages")
-    def validate_messages(cls, v: List[ClientMessage]) -> List[ClientMessage]:
-        # Check for potentially harmful content
-        if not v:
-            raise ValueError("At least one msg content is required")
-        if v and re.search(r"<[^>]*script", v[-1].content, re.IGNORECASE):
-            raise ValueError("Invalid message content")
-        return v
-
-
-class ChatResponse(BaseModel):
-    response: str
+    content: str
+    thread_id: str
+    stream_id: str
 
 
 class ErrorResponse(BaseModel):
     error: str
 
 
-# TODO: consider using Redis for production and removing this
-class Storage:
-    api_key_usage: Dict[str, List[datetime]] = {}
-    request_history: Dict[str, List[datetime]] = {}
-
-    @classmethod
-    async def cleanup_old_entries(cls):
-        now = datetime.now()
-        cutoff = now - timedelta(seconds=600)
-
-        # Cleanup api_key_usage
-        for api_key in list(cls.api_key_usage.keys()):
-            cls.api_key_usage[api_key] = [
-                timestamp
-                for timestamp in cls.api_key_usage[api_key]
-                if timestamp > cutoff
-            ]
-            if not cls.api_key_usage[api_key]:
-                del cls.api_key_usage[api_key]
-
-        # Cleanup request_history
-        for thread_id in list(cls.request_history.keys()):
-            cls.request_history[thread_id] = [
-                timestamp
-                for timestamp in cls.request_history[thread_id]
-                if timestamp > cutoff
-            ]
-            if not cls.request_history[thread_id]:
-                del cls.request_history[thread_id]
-
-
-# Update these constants at the top of your file
-STREAM_TIMEOUT = 60  # Global 60-second timeout for the entire stream
 KEEP_ALIVE_TIMEOUT = 15
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    cleanup_task = asyncio.create_task(Storage.cleanup_old_entries())
-
-    # Initialize evaluation client
+    # Startup: Initialize Redis and other services
+    # app.state.redis = redis.from_url(os.getenv("UPSTASH_REDIS_REST_URL"))
+    app.state.redis = Redis.from_env()
     app.state.evaluation_client = await get_evaluation_client()
-
-    # Initialize queue manager for graph
     app.state.queue_manager = EvaluationQueueManager()
 
+    # Set the global Redis client for session storage
+    if SESSION_STORAGE_MODE == "redis":
+        set_global_redis_client(app.state.redis)
+    else:
+        set_global_redis_client(None)
     instructor_client = instructor.from_openai(
         AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     )
-    # GraphEngine
     engine = create_engine(
         instructor_client=instructor_client, queue_manager=app.state.queue_manager
     )
     app.state.engine = engine
 
-    # Start services
     await app.state.queue_manager.start()
-
     yield
 
     # Shutdown
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        logger.warning("Cleanup task was cancelled")
-
-    # Stop services
+    await app.state.redis.close()
     await app.state.queue_manager.stop()
     await close_evaluation_client()
 
 
 # Initialize FastAPI
 app = FastAPI(
-    title="ChatRaghu API",
-    description="API for querying documents and returning LLM-formatted outputs",
-    version="2.1.0",
+    title="ChatRaghu Stream Generator",
+    description="API for generating LLM streams and writing them to Redis",
+    version="3.0.1",
     lifespan=lifespan,
 )
 
@@ -170,59 +98,26 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["POST", "OPTIONS", "GET"],
+    allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["X-Rate-Limit", "Content-Type", "X-Vercel-AI-Data-Stream"],
     max_age=600,
 )
 
-# Security and rate limiting constants
-MAX_API_REQUESTS_PER_MINUTE = 60
-MAX_USER_REQUESTS_PER_MINUTE = 10
-VALID_API_KEY = set(os.environ.get("VALID_API_KEYS", "").split(","))
+# Security: API Key for authenticating the proxy
+PROXY_API_KEY = os.getenv("VALID_API_KEYS")
 
 
-# Dependencies
-async def verify_api_key(
-    x_api_key: str = Header(..., description="API key for authentication")
-) -> str:
-    if x_api_key not in VALID_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    now = datetime.now()
-    if x_api_key in Storage.api_key_usage:
-        Storage.api_key_usage[x_api_key] = [
-            timestamp
-            for timestamp in Storage.api_key_usage[x_api_key]
-            if (now - timestamp).seconds < 60
-        ]
-        if len(Storage.api_key_usage[x_api_key]) >= MAX_API_REQUESTS_PER_MINUTE:
-            raise HTTPException(status_code=429, detail="API rate limit exceeded")
-
-    Storage.api_key_usage[x_api_key] = Storage.api_key_usage.get(x_api_key, []) + [now]
-    return x_api_key
+async def verify_proxy_key(
+    x_api_key: str = Header(..., description="API key from frontend proxy")
+):
+    """Dependency to verify the proxy API key."""
+    if not PROXY_API_KEY or x_api_key not in PROXY_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
 
 
-async def check_thread_rate_limit(thread_id: str) -> bool:
-    now = datetime.now()
-    if thread_id in Storage.request_history:
-        Storage.request_history[thread_id] = [
-            timestamp
-            for timestamp in Storage.request_history[thread_id]
-            if (now - timestamp).seconds < 60
-        ]
-        if len(Storage.request_history[thread_id]) >= MAX_USER_REQUESTS_PER_MINUTE:
-            raise HTTPException(status_code=429, detail="Thread rate limit exceeded")
-
-    Storage.request_history[thread_id] = Storage.request_history.get(thread_id, []) + [
-        now
-    ]
-    return True
-
-
-# Middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -234,6 +129,7 @@ async def add_security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
+    """Log incoming requests and outgoing responses."""
     if request.url.path == "/favicon.ico":
         return await call_next(request)
 
@@ -242,104 +138,151 @@ async def logging_middleware(request: Request, call_next):
         extra={
             "method": request.method,
             "url": str(request.url),
-            "path": request.url.path,
         },
     )
-    # Process request and measure timing
     start_time = datetime.now()
     response = await call_next(request)
     process_time = (datetime.now() - start_time).total_seconds()
 
-    # Log response
     logger.info(
         "Request completed",
         extra={
             "method": request.method,
             "url": str(request.url),
-            "path": request.url.path,
             "status_code": response.status_code,
-            "process_time": process_time,
+            "process_time": f"{process_time:.4f}s",
         },
     )
-
     return response
 
 
-async def stream_chunks(stream_gen, request: Request):
-    async for chunk, meta in stream_gen:
-        if chunk.type == "content" and chunk.content:
-            for line in str(chunk.content).split("\n"):
-                yield f"data: {line}\n"
-            yield "\n"
-            await asyncio.sleep(0)  # immediate flush
-
-        elif chunk.type == "end":
-            yield "data: [DONE]\n\n"
-            break
-
-
-@app.post(
-    "/api/chat",
-    response_model=ChatResponse,
-    responses={
-        200: {"model": ChatResponse},
-        400: {"model": ErrorResponse},
-        401: {"model": ErrorResponse},
-        429: {"model": ErrorResponse},
-        500: {"model": ErrorResponse},
-    },
-)
-async def chat(
-    request: Request, chat_request: ChatRequest, api_key: str = Depends(verify_api_key)
+async def generate_and_persist_stream(
+    engine, redis: Redis, thread_id: str, stream_id: str, initial_state: MessagesState
 ):
-    """Main chat endpoint handler"""
-    thread_id = (
-        chat_request.messages[0].thread_id
-        if chat_request.messages
-        else f"anon_{int(time.time())}_{os.urandom(4).hex()}"
-    )  # Generate anonymous thread ID
+    """
+    Executes the GraphEngine stream and writes each chunk to a Redis Stream.
+    This function is designed to run in the background and be resilient to Redis failures.
+    """
+    stream_key = f"stream:{stream_id}"
+    redis_is_functional = True  # Assume Redis is working initially
 
     try:
-        await check_thread_rate_limit(thread_id)
-        # Create state from thread history
-        new_message = HumanMessage(content=chat_request.messages[0].content)
-        initial_state = MessagesState.from_thread(thread_id, new_message)
-
-        now = datetime.now()
-        run_id = f"run_{now.strftime('%Y%m%d')}_{now.hour // 6:02d}"
+        run_id = f"run_{stream_id}"
         turn_index = (
             len(
                 [msg for msg in initial_state.messages if isinstance(msg, HumanMessage)]
             )
             - 1
-        )  # -1 because we just added one
-
-        stream_gen = request.app.state.engine.execute_stream(
-            initial_state, run_id, turn_index
         )
 
-        return FastAPIStreamingResponse(
-            content=stream_chunks(stream_gen, request),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Vercel-AI-Data-Stream": "v1",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        stream_gen = engine.execute_stream(initial_state, run_id, turn_index)
+
+        async for chunk, meta in stream_gen:
+            if chunk.type == "content" and chunk.content and redis_is_functional:
+                try:
+                    # This is the primary operation that can fail.
+                    # await redis.xadd(stream_key, "*",{"chunk": str(chunk.content).encode()})
+                    await redis.execute(
+                        ["XADD", stream_key, "*", "chunk", str(chunk.content)]
+                    )
+                except Exception as redis_error:
+                    redis_is_functional = False
+                    logger.error(
+                        "Redis connection failed during stream write. Halting stream persistence for this request.",
+                        extra={"thread_id": thread_id, "error": str(redis_error)},
+                    )
+                    # Do not attempt any more Redis writes for this request.
 
     except Exception as e:
         logger.error(
-            "Setup error",
-            extra={
-                "thread_id": thread_id,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "error_traceback": str(e.__traceback__.tb_frame.f_code.co_name),
-            },
+            "Unhandled error during stream generation logic",
+            extra={"thread_id": thread_id, "error": str(e)},
         )
-        raise
+        # If Redis was still functional before this broader error, try to write an error message.
+        if redis_is_functional:
+            try:
+                error_message = f"[STREAM_GENERATION_ERROR: {e}]"
+                # await redis.xadd(stream_key, "*", {"chunk": error_message.encode()})
+                await redis.execute(["XADD", stream_key, "*", "chunk", error_message])
+            except Exception as final_redis_error:
+                logger.error(
+                    "Redis failed while trying to write final error message.",
+                    extra={"thread_id": thread_id, "error": str(final_redis_error)},
+                )
+    finally:
+        # Only attempt to finalize the stream if Redis was working.
+        if redis_is_functional:
+            try:
+                # Always write an end-of-stream marker so consumers know when to stop.
+                # await redis.xadd(stream_key, "*", {"chunk": b"[END_OF_STREAM]"})
+                await redis.execute(
+                    ["XADD", stream_key, "*", "chunk", "[END_OF_STREAM]"]
+                )
+                # Set a 1-hour expiry on the stream to automatically clean up old data.
+                # await redis.expire(stream_key, 3600)
+                await redis.execute(["EXPIRE", stream_key, "3600"])
+                logger.info(f"Finished and cleaned up stream for {thread_id}")
+            except Exception as final_redis_error:
+                logger.error(
+                    "Redis failed during final cleanup.",
+                    extra={"thread_id": thread_id, "error": str(final_redis_error)},
+                )
+
+
+@app.post(
+    "/generate-stream",
+    dependencies=[Depends(verify_proxy_key)],
+    responses={
+        200: {"description": "Confirmation that stream generation has started"},
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def start_stream_generation(
+    request: Request,
+    chat_request: ChatRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Validates the request from the proxy, instantly returns a confirmation,
+    and starts the GraphEngine stream generation in a background task.
+    """
+    engine = request.app.state.engine
+    redis = request.app.state.redis
+
+    try:
+        new_message = HumanMessage(content=chat_request.content)
+        initial_state = await MessagesState.from_thread(
+            chat_request.thread_id, new_message
+        )
+
+        # Schedule the long-running stream generation in the background
+        background_tasks.add_task(
+            generate_and_persist_stream,
+            engine,
+            redis,
+            chat_request.thread_id,
+            chat_request.stream_id,
+            initial_state,
+        )
+
+        # Return an immediate confirmation to the proxy
+        return JSONResponse(
+            content={
+                "status": "generation_started",
+                "thread_id": chat_request.thread_id,
+            },
+            status_code=200,
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to start stream generation",
+            extra={"thread_id": chat_request.thread_id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=500, detail="Internal server error starting stream generation"
+        )
 
 
 @app.get("/health")

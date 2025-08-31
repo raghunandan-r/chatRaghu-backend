@@ -5,6 +5,31 @@ from typing import Any
 from pythonjsonlogger import jsonlogger
 from fastapi import Request
 import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+
+
+def initialize_sentry():
+    """Initializes Sentry SDK if in production environment."""
+    if os.getenv("ENVIRONMENT") == "prod":
+        sentry_logging = LoggingIntegration(
+            level=logging.INFO,  # Capture info and above as breadcrumbs
+            event_level=logging.ERROR,  # Send errors as events
+        )
+        sentry_sdk.init(
+            dsn=os.getenv("SENTRY_DSN"),
+            environment="production",
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+            integrations=[
+                FastApiIntegration(),
+                sentry_logging,
+            ],
+            send_default_pii=True,
+            _experiments={
+                "continuous_profiling_auto_start": True,
+            },
+        )
 
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):

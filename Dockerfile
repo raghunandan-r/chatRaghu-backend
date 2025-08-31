@@ -12,7 +12,7 @@ COPY --chown=appuser:appuser requirements.txt .
 
 # Install dependencies as the new user
 # --no-cache-dir reduces image size
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
 
 # Switch to the non-root user
 USER appuser

@@ -134,7 +134,7 @@ class GenerateSimpleResponseAdapter:
             output={"response": validated_response.text},
         )
         state.messages.append(AIMessage(content=validated_response.text))
-        state.update_thread_store()
+        await state.update_thread_store()
 
         return state
 
@@ -181,7 +181,7 @@ class GenerateAnswerWithHistoryAdapter:
             output={"response": validated_response.text},
         )
         state.messages.append(AIMessage(content=validated_response.text))
-        state.update_thread_store()
+        await state.update_thread_store()
 
         return state
 
@@ -247,6 +247,6 @@ class GenerateAnswerWithRagAdapter:
             metadata={"retrieved_docs": state.meta.get("retrieved_docs", [])},
         )
         state.messages.append(AIMessage(content=validated_response.text))
-        state.update_thread_store()
+        await state.update_thread_store()
 
         return state

@@ -122,6 +122,7 @@ class Config(BaseSettings):
 
     # API configuration
     api_host: str = Field(default="::", description="API host")
+    # api_host: str = Field(default="0.0.0.0", description="API host")
     api_port: int = Field(default=8001, description="API port")
     api_workers: int = Field(default=1, description="Number of API workers")
 
