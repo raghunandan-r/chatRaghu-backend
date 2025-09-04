@@ -20,7 +20,8 @@ from graph import (
     get_evaluation_client,
     close_evaluation_client,
     EvaluationQueueManager,
-    create_engine,
+    create_engine_default,
+    create_engine_immi,
 )
 from utils.logger import logger
 
@@ -45,6 +46,7 @@ class ChatRequest(BaseModel):
     content: str
     thread_id: str
     stream_id: str
+    query_type: str
 
 
 class ErrorResponse(BaseModel):
@@ -70,10 +72,12 @@ async def lifespan(app: FastAPI):
     instructor_client = instructor.from_openai(
         AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     )
-    engine = create_engine(
+    app.state.resume_engine = create_engine_default(
         instructor_client=instructor_client, queue_manager=app.state.queue_manager
     )
-    app.state.engine = engine
+    app.state.immi_engine = create_engine_immi(
+        instructor_client=instructor_client, queue_manager=app.state.queue_manager
+    )
 
     await app.state.queue_manager.start()
     yield
@@ -248,7 +252,10 @@ async def start_stream_generation(
     Validates the request from the proxy, instantly returns a confirmation,
     and starts the GraphEngine stream generation in a background task.
     """
-    engine = request.app.state.engine
+    if chat_request.query_type == "immi":
+        engine = request.app.state.immi_engine
+    else:
+        engine = request.app.state.resume_engine
     redis = request.app.state.redis
 
     try:

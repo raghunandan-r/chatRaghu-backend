@@ -23,7 +23,7 @@ from .models import HistoryEval
     project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
 )
 async def evaluate_history(
-    node_execution: EnrichedNodeExecutionLog, user_query: str
+    node_execution: EnrichedNodeExecutionLog, user_query: str, graph_version: str
 ) -> HistoryEval:
     """Evaluates the History adapter output using a structured LLM call."""
 
@@ -44,8 +44,9 @@ async def evaluate_history(
         user_query=user_query,
         conversation_history=conversation_history,
         model_output=model_output,
+        graph_version=graph_version,
     )
-    system_message = get_system_message("history")
+    system_message = get_system_message("history", graph_version)
 
     try:
         judgement, completion = await client.chat.completions.create_with_completion(
@@ -69,6 +70,8 @@ async def evaluate_history(
                 judgement.includes_key_info,
                 judgement.handles_irrelevance,
                 judgement.history_relevance,
+                judgement.is_safe,
+                judgement.is_clear,
             ]
         )
 
@@ -83,6 +86,8 @@ async def evaluate_history(
                 "handles_irrelevance": judgement.handles_irrelevance,
                 "history_relevance": judgement.history_relevance,
                 "explanation": judgement.explanation,
+                "is_safe": judgement.is_safe,
+                "is_clear": judgement.is_clear,
             },
             metadata={
                 "llm_judgement": judgement.model_dump(),
@@ -111,6 +116,8 @@ async def evaluate_history(
             explanation=judgement.explanation,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            is_safe=judgement.is_safe,
+            is_clear=judgement.is_clear,
         )
 
     except Exception as e:

@@ -34,13 +34,13 @@ class EvaluationQueueManager:
             if self._evaluation_client is None:
                 self._evaluation_client = await get_evaluation_client()
 
-            logger.info(
-                "Sending conversation flow to evaluation service",
-                extra={
-                    "thread_id": message.thread_id,
-                    "nodes_to_evaluate": message.node_executions,
-                },
-            )
+            # logger.info(
+            #     "Sending conversation flow to evaluation service",
+            #     extra={
+            #         "thread_id": message.thread_id,
+            #         "nodes_to_evaluate": message.node_executions,
+            #     },
+            # )
 
             # Send to evaluation service
             await self._evaluation_client.evaluate_conversation_async(message)

@@ -43,27 +43,69 @@ def _load_json_file(path: Path, description: str) -> dict:
 EVALUATOR_PROMPTS = _load_json_file(_PROMPTS_PATH, "evaluator prompts")
 
 
-def get_eval_prompt(evaluator_name: str, **kwargs) -> str:
+def get_eval_prompt(evaluator_name: str, graph_version: str, **kwargs) -> str:
     """
     Formats and returns the user prompt for a given evaluator.
 
     Args:
         evaluator_name: The key for the evaluator in prompts.json.
+        graph_version: The graph version to determine which prompt section to use.
         **kwargs: The values to format into the prompt template.
 
     Returns:
         The formatted prompt string.
     """
-    template = EVALUATOR_PROMPTS.get(evaluator_name, {}).get("user_prompt_template", "")
+    # Determine which section to use based on graph_version
+    if graph_version.startswith("i"):
+        section = "immi"
+    elif graph_version.startswith("v"):
+        section = "resume"
+    else:
+        logger.warning(
+            f"Unknown graph_version: {graph_version}, defaulting to 'resume'"
+        )
+        section = "resume"
+
+    template = (
+        EVALUATOR_PROMPTS.get(section, {})
+        .get(evaluator_name, {})
+        .get("user_prompt_template", "")
+    )
     if not template:
-        logger.warning(f"No prompt template found for evaluator: {evaluator_name}")
+        logger.warning(
+            f"No prompt template found for evaluator: {evaluator_name} in section: {section}"
+        )
         return ""
     return template.format(**kwargs)
 
 
-def get_system_message(evaluator_name: str) -> str:
-    """Returns the system message for a given evaluator."""
-    return EVALUATOR_PROMPTS.get(evaluator_name, {}).get("system_message", "")
+def get_system_message(evaluator_name: str, graph_version: str) -> str:
+    """
+    Returns the system message for a given evaluator.
+
+    Args:
+        evaluator_name: The key for the evaluator in prompts.json.
+        graph_version: The graph version to determine which prompt section to use.
+
+    Returns:
+        The system message string.
+    """
+    # Determine which section to use based on graph_version
+    if graph_version.startswith("i"):
+        section = "immi"
+    elif graph_version.startswith("v"):
+        section = "resume"
+    else:
+        logger.warning(
+            f"Unknown graph_version: {graph_version}, defaulting to 'resume'"
+        )
+        section = "resume"
+
+    return (
+        EVALUATOR_PROMPTS.get(section, {})
+        .get(evaluator_name, {})
+        .get("system_message", "")
+    )
 
 
 # --- Shared OpenAI Client ---

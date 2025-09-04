@@ -24,7 +24,7 @@ from .models import RAGEval
     project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
 )
 async def evaluate_rag(
-    node_execution: EnrichedNodeExecutionLog, user_query: str
+    node_execution: EnrichedNodeExecutionLog, user_query: str, graph_version: str
 ) -> RAGEval:
     """Evaluates the RAG adapter output using a structured LLM call."""
 
@@ -58,8 +58,9 @@ async def evaluate_rag(
         conversation_history=conversation_history,
         docs_text=docs_text,
         model_output=model_output,
+        graph_version=graph_version,
     )
-    system_message = get_system_message("rag")
+    system_message = get_system_message("rag", graph_version)
 
     if not eval_prompt or not system_message:
         logger.error(
@@ -73,6 +74,8 @@ async def evaluate_rag(
             includes_key_info=False,
             handles_irrelevance=False,
             document_relevance=False,
+            is_safe=False,
+            is_clear=False,
             explanation="Evaluator prompts missing; evaluation skipped.",
         )
 
@@ -98,6 +101,8 @@ async def evaluate_rag(
                 judgement.includes_key_info,
                 judgement.handles_irrelevance,
                 judgement.document_relevance,
+                judgement.is_safe,
+                judgement.is_clear,
             ]
         )
 
@@ -112,6 +117,8 @@ async def evaluate_rag(
                 "handles_irrelevance": judgement.handles_irrelevance,
                 "document_relevance": judgement.document_relevance,
                 "explanation": judgement.explanation,
+                "is_safe": judgement.is_safe,
+                "is_clear": judgement.is_clear,
             },
             metadata={
                 "llm_judgement": judgement.model_dump(),
@@ -141,6 +148,8 @@ async def evaluate_rag(
             explanation=judgement.explanation,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            is_safe=judgement.is_safe,
+            is_clear=judgement.is_clear,
         )
 
     except Exception as e:

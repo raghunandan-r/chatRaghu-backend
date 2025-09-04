@@ -26,6 +26,8 @@ class RAGEval(NodeEvaluation):
     includes_key_info: bool
     handles_irrelevance: bool
     document_relevance: bool
+    is_safe: Optional[bool] = None
+    is_clear: Optional[bool] = None
     explanation: str
 
 
@@ -37,6 +39,8 @@ class HistoryEval(NodeEvaluation):
     includes_key_info: bool
     handles_irrelevance: bool
     history_relevance: bool
+    is_safe: Optional[bool] = None
+    is_clear: Optional[bool] = None
     explanation: str
 
 
@@ -45,4 +49,6 @@ class SimpleResponseEval(NodeEvaluation):
 
     handles_irrelevance: bool
     response_appropriateness: bool
+    is_safe: Optional[bool] = None
+    is_clear: Optional[bool] = None
     explanation: str

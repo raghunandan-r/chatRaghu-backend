@@ -1,7 +1,7 @@
-from typing import Optional, Any, Dict, List, AsyncGenerator, Tuple
+from typing import Optional, Any, Dict, List, AsyncGenerator, Tuple, Union
 from datetime import datetime, timezone
 from opik import track, opik_context
-from graph.config import GraphConfig
+from graph.config import GraphConfigDefault, GraphConfigImmi
 from utils.logger import logger
 from .evaluation_models import ConversationFlow, EnrichedNodeExecutionLog
 from graph.models import MessagesState, StreamingResponse
@@ -144,14 +144,14 @@ class GraphEngine:
         entry_point: str,
         instructor_client,
         queue_manager=None,
-        config: GraphConfig | None = None,
+        config: Union[GraphConfigDefault, GraphConfigImmi, None] = None,
     ):
         self.nodes = nodes
         self.edges = edges
         self.entry_point = entry_point
         self.client = instructor_client
         self.queue_manager = queue_manager
-        self.config = config or GraphConfig()
+        self.config = config
         self.audit_service = AsyncAuditService(queue_manager=queue_manager)
 
     # TODO: when we branch to multiple LLM providers, or clarifications, mid-stream decisions and tool calling in streaming
@@ -189,6 +189,8 @@ class GraphEngine:
 
         current_node = self.entry_point
         state = initial_state
+        state.meta["graph_type"] = self.config.graph_type
+
         while current_node and current_node != "END":
             adapter = self.nodes[current_node]
             start_time = datetime.now(timezone.utc)

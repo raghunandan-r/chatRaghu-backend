@@ -6,7 +6,6 @@ import backoff
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Dict, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 from utils.logger import logger
@@ -14,9 +13,7 @@ from models import (
     EvaluationResult,
     RetryConfig,
     ConversationFlow,
-    EnrichedNodeExecutionLog,
 )
-from evaluators.models import NodeEvaluation
 from evaluators import EVALUATOR_REGISTRY
 from config import config
 from opik import track, opik_context
@@ -125,6 +122,7 @@ class AsyncEvaluator:
                         eval_result = await evaluator_func(
                             node_execution=node_execution,
                             user_query=conversation_flow.user_query,
+                            graph_version=conversation_flow.graph_version,
                         )
 
                         # Get the evaluation result as dict
@@ -339,49 +337,49 @@ class AsyncEvaluator:
         }
 
 
-async def evaluate_response(
-    node_execution: EnrichedNodeExecutionLog,
-    user_query: str,
-) -> Tuple[Dict[str, NodeEvaluation], bool]:
-    """
-    Evaluates a node's output using registered evaluators.
+# async def evaluate_response(
+#     node_execution: EnrichedNodeExecutionLog,
+#     user_query: str,
+# ) -> Tuple[Dict[str, NodeEvaluation], bool]:
+#     """
+#     Evaluates a node's output using registered evaluators.
 
-    Args:
-        node_execution: The enriched node execution log containing input/output
-        user_query: The original user query that triggered this execution
+#     Args:
+#         node_execution: The enriched node execution log containing input/output
+#         user_query: The original user query that triggered this execution
 
-    Returns:
-        Tuple of:
-        - Dict mapping evaluator names to their evaluation results
-        - Boolean indicating if all evaluations passed
-    """
-    node_name = node_execution.node_name
-    evaluator_functions = EVALUATOR_REGISTRY.get(node_name, [])
+#     Returns:
+#         Tuple of:
+#         - Dict mapping evaluator names to their evaluation results
+#         - Boolean indicating if all evaluations passed
+#     """
+#     node_name = node_execution.node_name
+#     evaluator_functions = EVALUATOR_REGISTRY.get(node_name, [])
 
-    if not evaluator_functions:
-        logger.warning(f"No evaluators registered for node: {node_name}")
-        return {}, True
+#     if not evaluator_functions:
+#         logger.warning(f"No evaluators registered for node: {node_name}")
+#         return {}, True
 
-    node_eval_results = {}
-    all_passed = True
+#     node_eval_results = {}
+#     all_passed = True
 
-    for evaluator_func in evaluator_functions:
-        eval_name = evaluator_func.__name__
-        try:
-            result = await evaluator_func(node_execution, user_query)
-            node_eval_results[eval_name] = result
-            if not result.overall_success:
-                all_passed = False
+#     for evaluator_func in evaluator_functions:
+#         eval_name = evaluator_func.__name__
+#         try:
+#             result = await evaluator_func(node_execution, user_query)
+#             node_eval_results[eval_name] = result
+#             if not result.overall_success:
+#                 all_passed = False
 
-        except Exception as e:
-            logger.error(
-                f"Failed to run evaluator {eval_name}",
-                extra={
-                    "error": str(e),
-                    "node_name": node_name,
-                    "evaluator": eval_name,
-                },
-            )
-            all_passed = False
+#         except Exception as e:
+#             logger.error(
+#                 f"Failed to run evaluator {eval_name}",
+#                 extra={
+#                     "error": str(e),
+#                     "node_name": node_name,
+#                     "evaluator": eval_name,
+#                 },
+#             )
+#             all_passed = False
 
-    return node_eval_results, all_passed
+#     return node_eval_results, all_passed

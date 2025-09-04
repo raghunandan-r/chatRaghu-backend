@@ -14,7 +14,11 @@ from .models import MessagesState, HumanMessage, AIMessage, ToolMessage
 
 TEMPLATES_PATH = Path(__file__).parent / "prompt_templates.json"
 TEMPLATES = json.load(open(TEMPLATES_PATH, "r", encoding="utf-8"))
-graph_version = TEMPLATES["version"]
+
+
+def get_graph_version(graph_type: str) -> str:
+    """Gets the graph version for a specific graph type."""
+    return TEMPLATES.get(graph_type, {}).get("version", "unknown")
 
 
 def build_conversation_history(
@@ -68,7 +72,9 @@ def render_system_prompt_(
     *,
     user_query: str,
     name: str,
+    graph_type: str,
     decision: str = "default",
+    language: str = "english",
 ) -> str:
     """
     Render the generate_answer prompt with base system + mode-specific partial.
@@ -81,7 +87,7 @@ def render_system_prompt_(
     Returns:
         Rendered system prompt
     """
-    ga = TEMPLATES[name]
+    ga = TEMPLATES[graph_type][name]
     base = ga["base_system"]
 
     # Router template has no partials, just base system prompt
@@ -96,6 +102,7 @@ def render_system_prompt_(
     content_vars = {
         "current_date_str": current_date_str,
         "user_query": user_query,
+        "language": language,
     }
 
     # Simple brace-style substitution

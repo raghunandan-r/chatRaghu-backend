@@ -23,7 +23,7 @@ from .models import SimpleResponseEval
     project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
 )
 async def evaluate_simple_response(
-    node_execution: EnrichedNodeExecutionLog, user_query: str
+    node_execution: EnrichedNodeExecutionLog, user_query: str, graph_version: str
 ) -> SimpleResponseEval:
     """Evaluates the SimpleResponse adapter output using a structured LLM call."""
 
@@ -43,8 +43,9 @@ async def evaluate_simple_response(
         user_query=user_query,
         conversation_history=conversation_history,
         model_output=model_output,
+        graph_version=graph_version,
     )
-    system_message = get_system_message("simple_response")
+    system_message = get_system_message("simple_response", graph_version)
 
     if not eval_prompt or not system_message:
         logger.error(
@@ -56,6 +57,8 @@ async def evaluate_simple_response(
             overall_success=False,
             handles_irrelevance=False,
             response_appropriateness=False,
+            is_safe=False,
+            is_clear=False,
             explanation="Evaluator prompts missing; evaluation skipped.",
         )
 
@@ -89,6 +92,8 @@ async def evaluate_simple_response(
                 "response_appropriateness": judgement.response_appropriateness,
                 "handles_irrelevance": judgement.handles_irrelevance,
                 "explanation": judgement.explanation,
+                "is_safe": judgement.is_safe,
+                "is_clear": judgement.is_clear,
             },
             metadata={
                 "llm_judgement": judgement.model_dump(),
@@ -103,6 +108,8 @@ async def evaluate_simple_response(
                 "result": judgement.model_dump_json(),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "is_safe": judgement.is_safe,
+                "is_clear": judgement.is_clear,
             },
         )
 
@@ -114,6 +121,8 @@ async def evaluate_simple_response(
             explanation=judgement.explanation,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            is_safe=judgement.is_safe,
+            is_clear=judgement.is_clear,
         )
 
     except Exception as e:

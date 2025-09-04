@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 from dataclasses import dataclass
-from graph.retrieval import RetrieveTool
 from opik import track, opik_context
 from utils.logger import logger
 
@@ -40,6 +39,7 @@ class RouterAdapter:
         system_prompt = render_system_prompt_(
             user_query=state.user_query,
             name=self.name,
+            graph_type=state.meta.get("graph_type"),
             decision=next(
                 (
                     msg.content
@@ -69,10 +69,18 @@ class RouterAdapter:
                 "thread_id": state.thread_id,
                 "decision": validated_response.decision,
                 "query_for_retrieval": validated_response.query_for_retrieval,
+                "language": validated_response.language,
             },
         )
 
         state.messages.append(AIMessage(content=validated_response.decision))
+        state.meta["refined_query"] = (
+            validated_response.query_for_retrieval
+            if validated_response.query_for_retrieval
+            else None
+        )
+        state.meta["language"] = validated_response.language
+
         # Opik for logging span under trace.
         opik_context.update_current_span(
             name=self.name,
@@ -97,6 +105,7 @@ class GenerateSimpleResponseAdapter:
         system_prompt = render_system_prompt_(
             user_query=state.user_query,
             name=self.name,
+            graph_type=state.meta.get("graph_type"),
             decision=next(
                 (
                     msg.content
@@ -105,6 +114,7 @@ class GenerateSimpleResponseAdapter:
                 ),
                 "default",
             ),
+            language=state.meta.get("language"),
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -151,7 +161,11 @@ class GenerateAnswerWithHistoryAdapter:
 
     async def build_prompt(self, state: MessagesState) -> PromptBundle:
         system_prompt = render_system_prompt_(
-            user_query=state.user_query, name=self.name, decision="answer_with_history"
+            user_query=state.user_query,
+            name=self.name,
+            graph_type=state.meta.get("graph_type"),
+            decision="answer_with_history",
+            language=state.meta.get("language"),
         )
         messages = [
             {"role": "system", "content": system_prompt},
@@ -196,17 +210,30 @@ class GenerateAnswerWithRagAdapter:
     name: str = "generate_answer_with_rag"
     response_model = GenerationResponse
 
+    def __init__(self, retriever):
+        """Initilize with the specified retriever tool"""
+        self.retriever = retriever
+
     async def build_prompt(self, state: MessagesState) -> PromptBundle:
         system_prompt = render_system_prompt_(
-            user_query=state.user_query, name=self.name, decision="retrieve_and_answer"
+            user_query=state.user_query,
+            name=self.name,
+            graph_type=state.meta.get("graph_type"),
+            decision="retrieve_and_answer",
+            language=state.meta.get("language"),
         )
 
         query = state.meta.get(
             "refined_query",
             state.user_query,
         )
-        retriever = RetrieveTool()
-        results = await retriever.execute(query)
+
+        retriever = self.retriever
+        results = await retriever.execute(query, state.meta.get("language", "en"))
+        logger.info(
+            "DEBUG:Retrieved docs",
+            extra={"thread_id": state.thread_id, "docs": results},
+        )
         state.meta["retrieved_docs"] = [r.to_dict() for r in results]
 
         state.messages.append(

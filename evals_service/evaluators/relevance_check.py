@@ -23,7 +23,7 @@ from .models import RouterEval
     project_name=os.getenv("OPIK_EVALS_SERVICE_PROJECT"),
 )
 async def evaluate_router(
-    node_execution: EnrichedNodeExecutionLog, user_query: str
+    node_execution: EnrichedNodeExecutionLog, user_query: str, graph_version: str
 ) -> RouterEval:
     """Evaluates the router node output using a structured LLM call."""
 
@@ -42,8 +42,9 @@ async def evaluate_router(
         user_query=user_query,
         conversation_history=conversation_history,
         model_output=model_output,
+        graph_version=graph_version,
     )
-    system_message = get_system_message("router")
+    system_message = get_system_message("router", graph_version)
 
     if not eval_prompt or not system_message:
         logger.error(
