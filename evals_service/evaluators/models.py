@@ -14,6 +14,7 @@ class NodeEvaluation(BaseModel):
 
 
 class RouterEval(NodeEvaluation):
+    classification: str
     routing_correct: bool
     explanation: str
 

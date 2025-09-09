@@ -52,6 +52,7 @@ async def evaluate_router(
         )
         return RouterEval(
             node_name="router",
+            classification=model_output,
             overall_success=False,
             routing_correct=False,
             explanation="Evaluator prompts missing; evaluation skipped.",
@@ -98,6 +99,7 @@ async def evaluate_router(
 
         return RouterEval(
             node_name="router",
+            classification=model_output,
             overall_success=judgement.routing_correct,
             routing_correct=judgement.routing_correct,
             explanation=judgement.explanation,

@@ -1,5 +1,5 @@
 from pathlib import Path
-import os
+from config import config
 import json
 from dotenv import load_dotenv
 import instructor
@@ -113,7 +113,7 @@ def get_system_message(evaluator_name: str, graph_version: str) -> str:
 client = instructor.from_openai(
     AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY"),
+        api_key=config.llm.openai_api_key,
         default_headers={
             "HTTP-Referer": "https://chatraghu-backend.ai",
             "X-Title": "chatraghu-backend",
