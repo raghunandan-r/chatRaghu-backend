@@ -30,6 +30,9 @@ def initialize_sentry():
                 "continuous_profiling_auto_start": True,
             },
         )
+        sentry_sdk.set_tag("project", "chieac-kyr-backend")
+        logger = logging.getLogger()  # Root logger
+        logger.info("SENTRY backend TEST: This info should appear somewhere")
 
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
