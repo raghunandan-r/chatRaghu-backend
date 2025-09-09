@@ -30,7 +30,7 @@ async def evaluate_rag(
 
     model_output = node_execution.output.get("text", "")
     retrieved_docs = node_execution.retrieved_docs or []
-    conversation_history = node_execution.input.get("conversation_history", [])
+    # conversation_history = node_execution.input.get("conversation_history", [])
 
     logger.info(
         "Starting RAG evaluation",
@@ -55,8 +55,8 @@ async def evaluate_rag(
     eval_prompt = get_eval_prompt(
         "rag",
         user_query=user_query,
-        conversation_history=conversation_history,
         docs_text=docs_text,
+        org_system_prompt=node_execution.system_prompt,
         model_output=model_output,
         graph_version=graph_version,
     )

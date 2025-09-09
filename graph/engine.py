@@ -207,7 +207,15 @@ class GraphEngine:
                     messages=messages,
                     stream=True,
                     temperature=self.config.default_temperature,
+                    max_tokens=4096,
                     response_model=GenerationResponse,
+                    extra_body={
+                        "provider": {
+                            "order": ["azure", "openai"],
+                            "data_collection": "deny",
+                        },
+                        "use_context": True,
+                    },
                 )
 
                 final_text, usage = "", None
@@ -251,11 +259,19 @@ class GraphEngine:
                     validated,
                     completion,
                 ) = await self.client.chat.completions.create_with_completion(
-                    model=self.config.default_model,
+                    model=self.config.thinking_model,
                     response_model=response_model,
                     messages=messages,
                     temperature=self.config.default_temperature,
                     max_retries=self.config.llm_retry_count,
+                    max_tokens=4096,
+                    extra_body={
+                        "provider": {
+                            "order": ["cerebras", "groq"],
+                            "data_collection": "deny",
+                        },
+                        "use_context": True,
+                    },
                 )
 
             # 3) routing and side-effects (retrieval)

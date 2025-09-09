@@ -9,7 +9,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from utils.logger import logger
 from .models import MessagesState, HumanMessage, AIMessage, ToolMessage
 
 TEMPLATES_PATH = Path(__file__).parent / "prompt_templates.json"
@@ -64,7 +63,7 @@ def build_conversation_history(
                     {"role": "assistant", "content": str(msg.output)}
                 )
 
-    logger.info("DEBUG: openai_messages", extra={"openai_messages": openai_messages})
+    # logger.info("DEBUG: openai_messages", extra={"openai_messages": openai_messages})
     return openai_messages
 
 

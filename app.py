@@ -59,7 +59,6 @@ KEEP_ALIVE_TIMEOUT = 15
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize Redis and other services
-    # app.state.redis = redis.from_url(os.getenv("UPSTASH_REDIS_REST_URL"))
     app.state.redis = Redis.from_env()
     app.state.evaluation_client = await get_evaluation_client()
     app.state.queue_manager = EvaluationQueueManager()
@@ -69,9 +68,18 @@ async def lifespan(app: FastAPI):
         set_global_redis_client(app.state.redis)
     else:
         set_global_redis_client(None)
+
     instructor_client = instructor.from_openai(
-        AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            default_headers={
+                "HTTP-Referer": "https://chatraghu-backend.ai",
+                "X-Title": "chatraghu-backend",
+            },
+        )
     )
+
     app.state.resume_engine = create_engine_default(
         instructor_client=instructor_client, queue_manager=app.state.queue_manager
     )

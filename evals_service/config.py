@@ -49,7 +49,7 @@ class LLMConfig(BaseSettings):
 
     openai_api_key: str = Field(..., description="OpenAI API key")
     openai_model: str = Field(
-        default="gpt-5-nano",
+        default="openai/gpt-oss-20b:free",
         description="OpenAI model to use for evaluation",
     )
     openai_max_retries: int = Field(
@@ -67,7 +67,7 @@ class LLMConfig(BaseSettings):
         default=100000, description="Rate limit for LLM tokens per minute"
     )
 
-    model_config = SettingsConfigDict(env_prefix="LLM_")
+    model_config = SettingsConfigDict(env_prefix="EVAL_")
 
 
 class ServiceConfig(BaseSettings):

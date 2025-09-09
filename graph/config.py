@@ -6,6 +6,7 @@ reading from environment variables with sensible defaults.
 """
 
 from dataclasses import dataclass
+import os
 from graph.utils import get_graph_version
 
 
@@ -15,7 +16,7 @@ class GraphConfigDefault:
 
     graph_type: str = "resume"
     # LLM settings
-    default_model: str = "gpt-4o-mini"  # "gpt-5-nano-2025-08-07" #
+    default_model: str = os.getenv("OPENROUTER_LLM_DEFAULT")
     default_temperature: float = 0.1  # 1.0
 
     # Retry settings
@@ -43,8 +44,9 @@ class GraphConfigImmi:
 
     graph_type: str = "immi"
     # LLM settings
-    default_model: str = "gpt-4.1-mini-2025-04-14"  # "gpt-5-nano-2025-08-07" #
+    default_model: str = os.getenv("OPENROUTER_LLM_DEFAULT")
     default_temperature: float = 0.1
+    thinking_model: str = os.getenv("OPENROUTER_LLM_THINKING")
 
     # Retry settings
     llm_retry_count: int = 3

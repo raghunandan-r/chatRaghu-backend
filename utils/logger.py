@@ -25,7 +25,7 @@ def initialize_sentry():
                 FastApiIntegration(),
                 sentry_logging,
             ],
-            send_default_pii=True,
+            send_default_pii=False,
             _experiments={
                 "continuous_profiling_auto_start": True,
             },

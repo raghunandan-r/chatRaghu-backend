@@ -1,9 +1,9 @@
 from pathlib import Path
+import os
 import json
 from dotenv import load_dotenv
 import instructor
 from openai import AsyncOpenAI
-from config import config
 from utils.logger import logger
 
 # --- Environment and Config Loading ---
@@ -112,6 +112,11 @@ def get_system_message(evaluator_name: str, graph_version: str) -> str:
 # Initialize and patch OpenAI client with instructor for all evaluators to use
 client = instructor.from_openai(
     AsyncOpenAI(
-        api_key=config.llm.openai_api_key, timeout=config.llm.openai_timeout_seconds
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        default_headers={
+            "HTTP-Referer": "https://chatraghu-backend.ai",
+            "X-Title": "chatraghu-backend",
+        },
     )
 )

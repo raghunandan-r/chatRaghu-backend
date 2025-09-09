@@ -1,6 +1,6 @@
 # ChatRaghu Backend
 
-A microservices-based backend for raghu.fyi application, consisting of a main API service and a separate evaluation service.
+A shared microservices-based backend for raghu.fyi and know-your-rights-iota.vercel.app applications, consisting of a main API service and a separate evaluation service.
 
 ## Architecture
 
@@ -16,33 +16,33 @@ The main service implements a simplified, adapter-driven graph engine:
 ```mermaid
 graph TD
     A["User Query"] --> R["Router"]
-    R -->|"greeting"| GS["Generate Simple"]
+    R -->|"greeting"| GS["Generate Simple Response"]
     R -->|"deflect"| GS
-    R -->|"answer_with_history"| GH["Generate History"]
-    R -->|"retrieve_and_answer"| GR["Generate RAG"]
-    GS --> S["Stream"]
+    R -->|"escalate"| GS
+    R -->|"answer with conversation history"| GH["Generate with History"]
+    R -->|"retrieve relevant docs and answer"| GR["Generate with RAG"]
+    GS --> S["Stream response to app"]
     GH --> S
     GR --> S
-    S --> Q["Evaluate"]
-    Q --> EV["Eval Service"]
-    EV --> K["Store"]
+    S -->|"evaluate"| EV["Eval Service"]
+    EV --> K["Store results in GCP"]
 
-    classDef blue fill:#e1f5fe
-    classDef orange fill:#fff3e0
+    classDef blue fill:#72B7B2
+    classDef springgreen fill:#54A24B,stroke:#54A24B,stroke-width:2px,color:#000000
     classDef green fill:#e8f5e8
-    classDef purple fill:#f3e5f5
-    classDef yellow fill:#fff8e1
+    classDef purple fill:#B279A2
+    classDef googlered fill:#E45756,stroke:#E45756,stroke-width:2px,color:#ffffff
 
     class A blue
-    class R orange
-    class GS,GH,GR,S green
-    class Q purple
-    class EV,K yellow
+    class R springgreen
+    class GS,GH,GR,S springgreen
+    class EV purple
+    class K googlered
 ```
 
 ### Graph Node Details
 
-- **Router (non-streaming)**: Chooses one of four decisions: `greeting`, `deflect`, `answer_with_history`, or `retrieve_and_answer`.
+- **Router (non-streaming)**: Chooses one of four decisions: `greeting`, `deflect`, `escalate`, `answer_with_history`, or `retrieve_and_answer`.
 - **Generate Simple Response (streaming)**: Handles `greeting` and `deflect` outcomes.
 - **Generate Answer with History (streaming)**: Answers using conversation history only.
 - **Generate Answer with RAG (streaming)**: Retrieves documents and answers with context.
@@ -55,6 +55,7 @@ The routing edges are defined as:
 router:
   greeting -> generate_simple_response
   deflect -> generate_simple_response
+  escalate -> generate_simple_response
   answer_with_history -> generate_answer_with_history
   retrieve_and_answer -> generate_answer_with_rag
 

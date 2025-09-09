@@ -43,6 +43,7 @@ async def evaluate_history(
         "history",
         user_query=user_query,
         conversation_history=conversation_history,
+        org_system_prompt=node_execution.system_prompt,
         model_output=model_output,
         graph_version=graph_version,
     )

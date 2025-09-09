@@ -29,7 +29,6 @@ async def evaluate_router(
 
     model_output = node_execution.output.get("decision", "")
     conversation_history = node_execution.input.get("conversation_history", [])
-    # original_system_prompt = get_main_graph_prompt("relevance_check")
 
     logger.info(
         "Starting router evaluation",
@@ -38,9 +37,9 @@ async def evaluate_router(
 
     eval_prompt = get_eval_prompt(
         "router",
-        # original_system_prompt=original_system_prompt,
         user_query=user_query,
         conversation_history=conversation_history,
+        org_system_prompt=node_execution.system_prompt,
         model_output=model_output,
         graph_version=graph_version,
     )

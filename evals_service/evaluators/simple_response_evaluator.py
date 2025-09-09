@@ -42,6 +42,7 @@ async def evaluate_simple_response(
         "simple_response",
         user_query=user_query,
         conversation_history=conversation_history,
+        org_system_prompt=node_execution.system_prompt,
         model_output=model_output,
         graph_version=graph_version,
     )
@@ -70,6 +71,7 @@ async def evaluate_simple_response(
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": eval_prompt},
             ],
+            max_tokens=4096,
         )
 
         prompt_tokens = completion.usage.prompt_tokens if completion.usage else None

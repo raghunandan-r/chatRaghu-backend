@@ -230,10 +230,10 @@ class GenerateAnswerWithRagAdapter:
 
         retriever = self.retriever
         results = await retriever.execute(query, state.meta.get("language", "en"))
-        logger.info(
-            "DEBUG:Retrieved docs",
-            extra={"thread_id": state.thread_id, "docs": results},
-        )
+        # logger.info(
+        #     "DEBUG:Retrieved docs",
+        #     extra={"thread_id": state.thread_id, "docs": results},
+        # )
         state.meta["retrieved_docs"] = [r.to_dict() for r in results]
 
         state.messages.append(
