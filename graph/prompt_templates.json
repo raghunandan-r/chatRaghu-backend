@@ -63,7 +63,7 @@
             "escalate": "Mode: ESCALATE\nContext:\n Acknowledge the user is in a serious situation \n provide the specialized detained collect line, explaining its purpose: 'If you or someone you know is currently in detention or facing an emergency, you can call our collect line at (312) 583-9721\n"
           }
       },
-      "version": "i1.0.1",
+      "version": "i1.0.2",
       "version_history": [
         {
           "version": "i1.0.0",
