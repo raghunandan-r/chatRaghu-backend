@@ -49,7 +49,7 @@ class LLMConfig(BaseSettings):
 
     openai_api_key: str = Field(..., description="OpenAI API key")
     openai_model: str = Field(
-        default="openai/gpt-oss-20b:free",
+        default="openai/gpt-oss-20b",
         description="OpenAI model to use for evaluation",
     )
     openai_max_retries: int = Field(

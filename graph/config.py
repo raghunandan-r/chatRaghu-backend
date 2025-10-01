@@ -18,6 +18,7 @@ class GraphConfigDefault:
     # LLM settings
     default_model: str = os.getenv("OPENROUTER_LLM_DEFAULT")
     default_temperature: float = 0.1  # 1.0
+    thinking_model: str = os.getenv("OPENROUTER_LLM_THINKING")
 
     # Retry settings
     llm_retry_count: int = 3

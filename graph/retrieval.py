@@ -373,7 +373,10 @@ class HybridRetrieveTool:
 
             # 2) Merge + dedupe
             merged_hits = self._merge_and_dedupe_hits(dense_hits, sparse_hits)
-            logger.debug("Merged hits", extra={"merged_count": len(merged_hits)})
+            logger.info(
+                "Hybrid Retrieval success: Overall documents count",
+                extra={"merged_count": len(merged_hits)},
+            )
 
             # 5) Rerank with graceful fallback on 429
             reranked_items: List[RetrievalResult] = []
@@ -453,6 +456,22 @@ class HybridRetrieveTool:
                     )
                     for h in merged_hits[: self._top_n]
                 ]
+
+            # Filter out docs with rerank score below a threshold
+            RERANK_MIN_SCORE = float(os.getenv("RERANK_MIN_SCORE", "0.0004"))
+            reranked_items = [
+                r
+                for r in reranked_items
+                if (
+                    r.metadata.get("rerank_score") is None  # keep fallback docs
+                    or r.metadata["rerank_score"] > RERANK_MIN_SCORE
+                )
+            ]
+
+            logger.info(
+                "Hybrid Retrieval success: Reranked documents",
+                extra={"reranked_items count": len(reranked_items)},
+            )
 
             opik_context.update_current_span(
                 name="hybrid_retrieval",

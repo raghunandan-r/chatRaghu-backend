@@ -81,7 +81,10 @@ def render_system_prompt_(
     Args:
         user_query: The user's query
         name: The name of the adapter
+        graph_type: The type of graph being used
         decision: The decision made by the router
+        language: The language for the response
+        sparse_search_context: Context from sparse search for router decisions
 
     Returns:
         Rendered system prompt
